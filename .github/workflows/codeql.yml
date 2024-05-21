@@ -1,0 +1,23 @@
+name: "CodeQL"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '31 10 * * 0'
+
+permissions: {}
+
+jobs:
+  CodeQL:
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    uses: bytemare/workflows/.github/workflows/codeql.yml@b1646a1525a16e413436f5b74e308685a2f7d7d3
+    with:
+      language: go

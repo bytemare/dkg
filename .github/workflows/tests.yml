@@ -1,0 +1,22 @@
+name: Run Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  Test:
+    strategy:
+      fail-fast: false
+      matrix:
+        go: [ '1.22', '1.21' ]
+    uses: bytemare/workflows/.github/workflows/test-go.yml@b1646a1525a16e413436f5b74e308685a2f7d7d3
+    with:
+      command: cd .github && make test
+      version: ${{ matrix.go }}
