@@ -3,8 +3,8 @@
 This is a checklist of a basic setup for your GitHub repo.
 
 ## Files
-- [ ] Replace all occurrences of {{.template}} with the lowercase repo name
-- [ ] Replace all occurrences of {{.TEMPLATE}} with the uppercase repo name
+- [ ] Replace all occurrences of dkg with the lowercase repo name
+- [ ] Replace all occurrences of dkg with the uppercase repo name
 - [ ] Add a `LICENSE` file with the year(s) and name
 - [ ] Add a `README.md` file at the root
   - [ ] State the purpose of the project
