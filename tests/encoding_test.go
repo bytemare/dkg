@@ -9,8 +9,16 @@
 package tests_test
 
 import (
+	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"math/big"
+	"slices"
+	"strings"
 	"testing"
+
+	group "github.com/bytemare/crypto"
 
 	"github.com/bytemare/dkg"
 )
@@ -224,6 +232,205 @@ func TestParticipant_NewRound2Data(t *testing.T) {
 
 		if d.SenderIdentifier != 0 || d.RecipientIdentifier != 0 {
 			t.Fatal()
+		}
+	})
+}
+
+func TestRound1_Decode_Fail(t *testing.T) {
+	errInvalidCiphersuite := errors.New("invalid ciphersuite")
+	errDecodeNoMessage := errors.New("no data to decode")
+	errDecodeInvalidLength := errors.New("invalid encoding length")
+	errDecodeProofR := errors.New("invalid encoding of R proof")
+	errDecodeProofZ := errors.New("invalid encoding of z proof")
+	errDecodeCommitment := errors.New("invalid encoding of commitment")
+
+	testAllCases(t, func(c *testCase) {
+		p, _ := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold)
+		r1 := p.NewRound1Data()
+
+		// nil or len = 0
+		if err := r1.Decode(nil); err == nil || err.Error() != errDecodeNoMessage.Error() {
+			t.Fatalf("expected error %q, got %q", errDecodeNoMessage, err)
+		}
+
+		if err := r1.Decode([]byte{}); err == nil || err.Error() != errDecodeNoMessage.Error() {
+			t.Fatalf("expected error %q, got %q", errDecodeNoMessage, err)
+		}
+
+		// invalid ciphersuite
+		if err := r1.Decode([]byte{2}); err == nil || err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected error %q, got %q", errInvalidCiphersuite, err)
+		}
+
+		badC := dkg.Ristretto255Sha512
+		if c.ciphersuite == dkg.Ristretto255Sha512 {
+			badC = dkg.P256Sha256
+		}
+		if err := r1.Decode([]byte{byte(badC)}); err == nil || err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected error %q, got %q", errInvalidCiphersuite, err)
+		}
+
+		// invalid length: to low, too high
+		expectedSize := 1 + 8 + c.group.ElementLength() + c.group.ScalarLength() + int(
+			c.threshold,
+		)*c.group.ElementLength()
+		data := make([]byte, expectedSize+1)
+		data[0] = byte(c.ciphersuite)
+
+		expected := fmt.Sprintf("%s: expected %d got %d", errDecodeInvalidLength, expectedSize, len(data))
+		if err := r1.Decode(data); err == nil || err.Error() != expected {
+			t.Fatalf("expected error %q, got %q", expected, err)
+		}
+
+		expected = fmt.Sprintf("%s: expected %d got %d", errDecodeInvalidLength, expectedSize, expectedSize-1)
+		if err := r1.Decode(data[:expectedSize-1]); err == nil || err.Error() != expected {
+			t.Fatalf("expected error %q, got %q", expected, err)
+		}
+
+		// proof: bad r
+		data = make([]byte, 9, expectedSize)
+		data[0] = byte(c.group)
+		binary.LittleEndian.PutUint64(data[1:9], 1)
+		data = append(data, badElement(t, c.group)...)
+		data = append(data, badScalar(t, c.group)...)
+		data = append(data, make([]byte, expectedSize-len(data))...) // fill the tail
+
+		if err := r1.Decode(data); err == nil || !strings.HasPrefix(err.Error(), errDecodeProofR.Error()) {
+			t.Fatalf("expected error %q, got %q", errDecodeProofR, err)
+		}
+
+		// proof: bad z
+		data = make([]byte, 9, expectedSize)
+		data[0] = byte(c.group)
+		binary.LittleEndian.PutUint64(data[1:9], 256)
+		data = append(data, c.group.Base().Encode()...)
+		data = append(data, badScalar(t, c.group)...)
+		data = append(data, make([]byte, expectedSize-len(data))...) // fill the tail
+
+		if err := r1.Decode(data); err == nil || !strings.HasPrefix(err.Error(), errDecodeProofZ.Error()) {
+			t.Fatalf("expected error %q, got %q", errDecodeProofZ, err)
+		}
+
+		// commitment: some error in one of the elements
+		data = make([]byte, 9, expectedSize)
+		data[0] = byte(c.group)
+		binary.LittleEndian.PutUint64(data[1:9], 1)
+		data = append(data, c.group.Base().Encode()...)
+		data = append(data, c.group.NewScalar().Random().Encode()...)
+		for range c.threshold {
+			data = append(data, badElement(t, c.group)...)
+		}
+
+		if err := r1.Decode(data); err == nil || !strings.HasPrefix(err.Error(), errDecodeCommitment.Error()) {
+			t.Fatalf("expected error %q, got %q", errDecodeCommitment, err)
+		}
+	})
+}
+
+func badScalar(t *testing.T, g group.Group) []byte {
+	order, ok := new(big.Int).SetString(g.Order(), 0)
+	if !ok {
+		t.Errorf("setting int in base %d failed: %v", 0, g.Order())
+	}
+
+	encoded := make([]byte, g.ScalarLength())
+	order.FillBytes(encoded)
+
+	if g == group.Ristretto255Sha512 || g == group.Edwards25519Sha512 {
+		slices.Reverse(encoded)
+	}
+
+	return encoded
+}
+
+func badElement(t *testing.T, g group.Group) []byte {
+	order, ok := new(big.Int).SetString(g.Order(), 0)
+	if !ok {
+		t.Errorf("setting int in base %d failed: %v", 0, g.Order())
+	}
+
+	encoded := make([]byte, g.ElementLength())
+	order.FillBytes(encoded)
+
+	if g == group.Ristretto255Sha512 || g == group.Edwards25519Sha512 {
+		slices.Reverse(encoded)
+	}
+
+	return encoded
+}
+
+func TestBadScalar(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		if err := c.group.NewScalar().Decode(badScalar(t, c.group)); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestBadElement(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		if err := c.group.NewElement().Decode(badElement(t, c.group)); err == nil {
+			t.Error("expected error")
+		}
+	})
+}
+
+func TestRound2_Decode_Fail(t *testing.T) {
+	errInvalidCiphersuite := errors.New("invalid ciphersuite")
+	errDecodeNoMessage := errors.New("no data to decode")
+	errDecodeInvalidLength := errors.New("invalid encoding length")
+	errDecodeSecretShare := errors.New("invalid encoding of secret share")
+
+	testAllCases(t, func(c *testCase) {
+		p, _ := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold)
+		r2 := p.NewRound2Data()
+
+		// nil or len = 0
+		if err := r2.Decode(nil); err == nil || err.Error() != errDecodeNoMessage.Error() {
+			t.Fatalf("expected error %q, got %q", errDecodeNoMessage, err)
+		}
+
+		if err := r2.Decode([]byte{}); err == nil || err.Error() != errDecodeNoMessage.Error() {
+			t.Fatalf("expected error %q, got %q", errDecodeNoMessage, err)
+		}
+
+		// invalid ciphersuite
+		if err := r2.Decode([]byte{2}); err == nil || err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected error %q, got %q", errInvalidCiphersuite, err)
+		}
+
+		badC := dkg.Ristretto255Sha512
+		if c.ciphersuite == dkg.Ristretto255Sha512 {
+			badC = dkg.P256Sha256
+		}
+		if err := r2.Decode([]byte{byte(badC)}); err == nil || err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected error %q, got %q", errInvalidCiphersuite, err)
+		}
+
+		// invalid length: too short, too long
+		expectedSize := 1 + 16 + c.group.ScalarLength()
+		data := make([]byte, expectedSize+1)
+		data[0] = byte(c.ciphersuite)
+
+		expected := fmt.Sprintf("%s: expected %d got %d", errDecodeInvalidLength, expectedSize, len(data))
+		if err := r2.Decode(data); err == nil || err.Error() != expected {
+			t.Fatalf("expected error %q, got %q", expected, err)
+		}
+
+		expected = fmt.Sprintf("%s: expected %d got %d", errDecodeInvalidLength, expectedSize, expectedSize-1)
+		if err := r2.Decode(data[:expectedSize-1]); err == nil || err.Error() != expected {
+			t.Fatalf("expected error %q, got %q", expected, err)
+		}
+
+		// bad share encoding
+		data = make([]byte, 17, expectedSize)
+		data[0] = byte(c.group)
+		binary.LittleEndian.PutUint64(data[1:9], 1)
+		binary.LittleEndian.PutUint64(data[9:17], 2)
+		data = append(data, badScalar(t, c.group)...)
+
+		if err := r2.Decode(data); err == nil || !strings.HasPrefix(err.Error(), errDecodeSecretShare.Error()) {
+			t.Fatalf("expected error %q, got %q", errDecodeSecretShare, err)
 		}
 	})
 }

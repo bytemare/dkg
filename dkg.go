@@ -163,13 +163,20 @@ func (p *Participant) initPoly(polynomial ...*group.Scalar) error {
 
 // Start returns a participant's output for the first round.
 func (p *Participant) Start() *Round1Data {
+	return p.StartWithRandom(nil)
+}
+
+// StartWithRandom returns a participant's output for the first round and allows setting the random input for the NIZK
+// proof.
+func (p *Participant) StartWithRandom(random *group.Scalar) *Round1Data {
 	commitment := secretsharing.Commit(p.group, p.polynomial)
 	p.publicShare = commitment[0]
 	package1 := &Round1Data{
+		threshold:        p.threshold,
 		Group:            p.group,
 		SenderIdentifier: p.Identifier,
 		Commitment:       commitment,
-		ProofOfKnowledge: FrostGenerateZeroKnowledgeProof(p.group, p.Identifier, p.polynomial[0], commitment[0]),
+		ProofOfKnowledge: generateZKProof(p.group, p.Identifier, p.polynomial[0], commitment[0], random),
 	}
 
 	return package1
@@ -197,7 +204,7 @@ func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint64]*Round2Data,
 		peer := data.SenderIdentifier
 
 		// round1, step 5
-		if !FrostVerifyZeroKnowledgeProof(p.group, peer, data.Commitment[0], data.ProofOfKnowledge) {
+		if !verifyZKProof(p.group, peer, data.Commitment[0], data.ProofOfKnowledge) {
 			return nil, fmt.Errorf(
 				"%w: participant %v",
 				errInvalidSignature,

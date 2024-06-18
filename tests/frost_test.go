@@ -9,6 +9,8 @@
 package tests_test
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	group "github.com/bytemare/crypto"
@@ -43,7 +45,7 @@ func TestFrostGenerateZeroKnowledgeProof(t *testing.T) {
 		r := readHexElement(t, c.group, c.zk.r)
 		z := readHexScalar(t, c.group, c.zk.z)
 
-		s := dkg.FrostGenerateZeroKnowledgeProof(c.group, id, sk, pk, k)
+		s, _ := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, k)
 
 		if s == nil {
 			t.Fatal()
@@ -68,7 +70,7 @@ func TestFrostVerifyZeroKnowledgeProof(t *testing.T) {
 			Z: readHexScalar(t, c.group, c.zk.z),
 		}
 
-		if !dkg.FrostVerifyZeroKnowledgeProof(c.group, id, pk, s) {
+		if ok, _ := dkg.FrostVerifyZeroKnowledgeProof(c.ciphersuite, id, pk, s); !ok {
 			t.Fatal()
 		}
 	})
@@ -80,7 +82,7 @@ func TestSignature_Clear(t *testing.T) {
 		sk := c.group.NewScalar().Random()
 		pk := c.group.Base().Multiply(sk)
 		id := uint64(1)
-		s := dkg.FrostGenerateZeroKnowledgeProof(c.group, id, sk, pk, k)
+		s, _ := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, k)
 		s.Clear()
 
 		if !s.R.IsIdentity() {
@@ -91,4 +93,71 @@ func TestSignature_Clear(t *testing.T) {
 			t.Fatal()
 		}
 	})
+}
+
+func TestFrostWrongGroup(t *testing.T) {
+	errInvalidCiphersuite := errors.New("invalid ciphersuite")
+	testAllCases(t, func(c *testCase) {
+		badGroup := dkg.Ciphersuite(2)
+		sk := c.group.NewScalar().Random()
+		pk := c.group.Base().Multiply(sk)
+
+		// FrostGenerateZeroKnowledgeProof
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(badGroup, 1, sk, pk); err == nil ||
+			err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected %q, got %q", errInvalidCiphersuite, err)
+		}
+
+		// FrostVerifyZeroKnowledgeProof
+		p, _ := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, 1, sk, pk)
+		if _, err := dkg.FrostVerifyZeroKnowledgeProof(badGroup, 1, pk, p); err == nil ||
+			err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected %q, got %q", errInvalidCiphersuite, err)
+		}
+	})
+}
+
+func hasPanic(f func()) (has bool, err error) {
+	defer func() {
+		var report any
+		if report = recover(); report != nil {
+			has = true
+			err = fmt.Errorf("%v", report)
+		}
+	}()
+
+	f()
+
+	return has, err
+}
+
+// testPanic executes the function f with the expectation to recover from a panic. If no panic occurred or if the
+// panic message is not the one expected, ExpectPanic returns an error.
+func testPanic(s string, expectedError error, f func()) error {
+	errNoPanic := errors.New("no panic")
+	errNoPanicMessage := errors.New("panic but no message")
+
+	hasPanic, err := hasPanic(f)
+
+	// if there was no panic
+	if !hasPanic {
+		return errNoPanic
+	}
+
+	// panic, and we don't expect a particular message
+	if expectedError == nil {
+		return nil
+	}
+
+	// panic, but the panic value is empty
+	if err == nil {
+		return errNoPanicMessage
+	}
+
+	// panic, but the panic value is not what we expected
+	if err.Error() != expectedError.Error() {
+		return fmt.Errorf("expected panic on %s with message %q, got %q", s, expectedError, err)
+	}
+
+	return nil
 }
