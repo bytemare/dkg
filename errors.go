@@ -29,6 +29,7 @@ var (
 	errMissingPackageRound1    = errors.New("missing package in round 1 data set")
 	errNoCommitment            = errors.New("empty commitment in package")
 	errCommitmentNilElement    = errors.New("commitment has nil element")
+	errCommitmentEmpty         = errors.New("commitment is empty")
 	errPolynomialLength        = errors.New("invalid polynomial length")
 	errDecodeNoMessage         = errors.New("no data to decode")
 	errDecodeInvalidLength     = errors.New("invalid encoding length")

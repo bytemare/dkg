@@ -230,8 +230,8 @@ func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint64]*Round2Data,
 func getCommitment(r1DataSet []*Round1Data, id uint64) (secretsharing.Commitment, error) {
 	for _, r1d := range r1DataSet {
 		if r1d.SenderIdentifier == id {
-			if r1d.Commitment == nil {
-				return nil, errCommitmentNilElement
+			if len(r1d.Commitment) == 0 {
+				return nil, fmt.Errorf("%w: %d", errCommitmentEmpty, id)
 			}
 
 			return r1d.Commitment, nil
@@ -284,37 +284,17 @@ func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data)
 		}
 
 		// Verify the secret share is valid with regard to the commitment.
-		pk := p.group.Base().Multiply(data.SecretShare)
-
-		pkc, err := PubKeyForCommitment(p.group, com, p.Identifier, ids)
-		if err != nil {
-			return nil, nil, fmt.Errorf(
-				"%w: %d",
-				err,
-				data.SenderIdentifier,
-			)
+		if _err := p.verifyCommitmentPublicKey(data.SenderIdentifier, data.SecretShare, ids, com); _err != nil {
+			return nil, nil, _err
 		}
 
-		if pk.Equal(pkc) != 1 {
-			return nil, nil, fmt.Errorf(
-				"%w: %d",
-				errInvalidSecretShare,
-				data.SenderIdentifier,
-			)
-		}
-
-		// Round 2, step 3
 		secretKey.Add(data.SecretShare)
-
-		// Round 2, step 4
 		groupPublic.Add(com[0])
 	}
 
 	secretKey.Add(p.secretShare)
 	groupPublic.Add(p.publicShare)
 	p.secretShare.Zero()
-
-	// round 2, step 4
 	publicKey := p.group.Base().Multiply(secretKey)
 
 	return &KeyShare{
@@ -322,6 +302,29 @@ func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data)
 		SecretKey:  secretKey,
 		PublicKey:  publicKey,
 	}, groupPublic, nil
+}
+
+func (p *Participant) verifyCommitmentPublicKey(id uint64, share, ids *group.Scalar, com []*group.Element) error {
+	pk := p.group.Base().Multiply(share)
+
+	pkc, err := PubKeyForCommitment(p.group, com, p.Identifier, ids)
+	if err != nil {
+		return fmt.Errorf(
+			"%w: %d",
+			err,
+			id,
+		)
+	}
+
+	if pk.Equal(pkc) != 1 {
+		return fmt.Errorf(
+			"%w: %d",
+			errInvalidSecretShare,
+			id,
+		)
+	}
+
+	return nil
 }
 
 // GroupPublicKey returns the global public key, usable to verify signatures produced in a threshold scheme.

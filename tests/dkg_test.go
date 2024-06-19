@@ -363,6 +363,7 @@ func TestParticipant_Finalize_Bad(t *testing.T) {
 	errCommitmentNotFound := errors.New("commitment not found in Round 1 data for participant")
 	errInvalidSecretShare := errors.New("invalid secret share received from peer")
 	errCommitmentNilElement := errors.New("commitment has nil element")
+	errCommitmentEmpty := errors.New("commitment is empty")
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
@@ -460,6 +461,23 @@ func TestParticipant_Finalize_Bad(t *testing.T) {
 		d = r2[p[4].Identifier]
 		expectedError := errCommitmentNotFound.Error() + ": 1"
 		if _, _, err := p[4].Finalize(r1[1:], d); err == nil || err.Error() != expectedError {
+			t.Fatalf("expected error %q, got %q", expectedError, err)
+		}
+
+		// some commitment is nil or empty
+		r1 = c.runRound1(p)
+		r2 = c.runRound2(t, p, r1)
+		d = r2[p[0].Identifier]
+
+		r1[3].Commitment = nil
+		expectedError = errCommitmentEmpty.Error() + ": 4"
+		if _, _, err := p[0].Finalize(r1, d); err == nil || err.Error() != expectedError {
+			t.Fatalf("expected error %q, got %q", expectedError, err)
+		}
+
+		r1[3].Commitment = []*group.Element{}
+		expectedError = errCommitmentEmpty.Error() + ": 4"
+		if _, _, err := p[0].Finalize(r1, d); err == nil || err.Error() != expectedError {
 			t.Fatalf("expected error %q, got %q", expectedError, err)
 		}
 
