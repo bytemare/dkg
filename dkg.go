@@ -270,6 +270,7 @@ func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data)
 
 	secretKey := p.group.NewScalar()
 	groupPublic := p.group.NewElement()
+	ids := p.group.NewScalar().SetUInt64(p.Identifier)
 
 	for _, data := range r2DataSet {
 		if err := p.checkRound2DataHeader(data); err != nil {
@@ -284,7 +285,17 @@ func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data)
 
 		// Verify the secret share is valid with regard to the commitment.
 		pk := p.group.Base().Multiply(data.SecretShare)
-		if !secretsharing.Verify(p.group, p.Identifier, pk, com) {
+
+		pkc, err := PubKeyForCommitment(p.group, com, p.Identifier, ids)
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"%w: %d",
+				err,
+				data.SenderIdentifier,
+			)
+		}
+
+		if pk.Equal(pkc) != 1 {
 			return nil, nil, fmt.Errorf(
 				"%w: %d",
 				errInvalidSecretShare,
@@ -356,14 +367,44 @@ func VerifyPublicKey(c Ciphersuite, id uint64, pubKey *group.Element, r1data []*
 	return nil
 }
 
+func comPubKey(g group.Group, s *group.Scalar, pk *group.Element, commitment []*group.Element) (*group.Element, error) {
+	// if there are elements left and since j == 1, we can spare one exponentiation
+	if commitment[1] == nil {
+		return nil, errCommitmentNilElement
+	}
+
+	pk.Add(commitment[1].Copy().Multiply(s))
+
+	i := 2
+	j := uint64(1)
+
+	js := g.NewScalar()
+
+	for _, com := range commitment[i:] {
+		if com == nil {
+			return nil, errCommitmentNilElement
+		}
+
+		j++
+		js.SetUInt64(j)
+		pk.Add(com.Copy().Multiply(s.Copy().Pow(js)))
+	}
+
+	return pk, nil
+}
+
 // PubKeyForCommitment computes the public key corresponding to the commitment of participant id. ids is the scalar form
-// of id, which is converted if not provided.
+// of id, which is set appropriately if not already provided.
 func PubKeyForCommitment(
 	g group.Group,
 	commitment []*group.Element,
 	id uint64,
 	ids ...*group.Scalar,
 ) (*group.Element, error) {
+	if !Ciphersuite(g).Available() {
+		return nil, errInvalidCiphersuite
+	}
+
 	var s *group.Scalar
 	if len(ids) == 0 || ids[0] == nil {
 		s = g.NewScalar().SetUInt64(id)
@@ -371,8 +412,6 @@ func PubKeyForCommitment(
 		s = ids[0]
 	}
 
-	i := 1
-	j := uint64(1)
 	pk := commitment[0].Copy()
 
 	switch {
@@ -386,28 +425,7 @@ func PubKeyForCommitment(
 			pk.Add(com)
 		}
 	case len(commitment) >= 2:
-		// if there are elements left and since j == 1, we can spare one exponentiation
-		if commitment[1] == nil {
-			return nil, errCommitmentNilElement
-		}
-
-		pk.Add(commitment[1].Copy().Multiply(s))
-
-		i++
-
-		fallthrough
-	default:
-		js := g.NewScalar()
-
-		for _, com := range commitment[i:] {
-			if com == nil {
-				return nil, errCommitmentNilElement
-			}
-
-			j++
-			js.SetUInt64(j)
-			pk.Add(com.Copy().Multiply(s.Copy().Pow(js)))
-		}
+		return comPubKey(g, s, pk, commitment)
 	}
 
 	return pk, nil

@@ -147,6 +147,7 @@ func h2ed25519(input []byte) *group.Scalar {
 
 	s := edwards25519.NewScalar()
 	if _, err := s.SetUniformBytes(h); err != nil {
+		// Unreachable, since h will always be of the right length
 		panic(err)
 	}
 

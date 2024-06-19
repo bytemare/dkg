@@ -260,6 +260,7 @@ func TestParticipant_Continue(t *testing.T) {
 
 func TestParticipant_Continue_Bad(t *testing.T) {
 	errRound1DataElements := errors.New("invalid number of expected round 1 data packets")
+	errCommitmentNilElement := errors.New("commitment has nil element")
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
@@ -311,7 +312,46 @@ func TestParticipant_Continue_Bad(t *testing.T) {
 		if _, err := p[0].Continue(r1); err == nil || err.Error() != expectedError {
 			t.Fatalf("expected error %q, got %q", expectedError, err)
 		}
+
+		// bad commitment[0]
+		r1 = make([]*dkg.Round1Data, 0, c.maxParticipants)
+		for i := range c.maxParticipants {
+			r1 = append(r1, p[i].Start())
+		}
+
+		r1[2].Commitment[0] = nil
+		if _, err := p[0].Continue(r1); err == nil || err.Error() != errCommitmentNilElement.Error() {
+			t.Fatalf("expected error %q, got %q", errCommitmentNilElement, err)
+		}
 	})
+}
+
+func (c *testCase) runRound1(p []*dkg.Participant) []*dkg.Round1Data {
+	r1 := make([]*dkg.Round1Data, 0, c.maxParticipants)
+	for i := range c.maxParticipants {
+		r1 = append(r1, p[i].Start())
+	}
+
+	return r1
+}
+
+func (c *testCase) runRound2(t *testing.T, p []*dkg.Participant, r1 []*dkg.Round1Data) map[uint64][]*dkg.Round2Data {
+	r2 := make(map[uint64][]*dkg.Round2Data, c.maxParticipants)
+	for i := range c.maxParticipants {
+		r, err := p[i].Continue(r1)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for id, data := range r {
+			if r2[id] == nil {
+				r2[id] = make([]*dkg.Round2Data, 0, c.maxParticipants-1)
+			}
+			r2[id] = append(r2[id], data)
+		}
+	}
+
+	return r2
 }
 
 func TestParticipant_Finalize_Bad(t *testing.T) {
@@ -322,6 +362,7 @@ func TestParticipant_Finalize_Bad(t *testing.T) {
 	errRound2FaultyPackage := errors.New("malformed Round2Data package: sender and recipient are the same")
 	errCommitmentNotFound := errors.New("commitment not found in Round 1 data for participant")
 	errInvalidSecretShare := errors.New("invalid secret share received from peer")
+	errCommitmentNilElement := errors.New("commitment has nil element")
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
@@ -351,10 +392,7 @@ func TestParticipant_Finalize_Bad(t *testing.T) {
 		}
 
 		// incompatible r1 and r2 dataset lengths
-		r1 = make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
+		r1 = c.runRound1(p)
 
 		r2 := make(map[uint64][]*dkg.Round2Data, c.maxParticipants)
 		for i := range c.maxParticipants {
@@ -394,25 +432,8 @@ func TestParticipant_Finalize_Bad(t *testing.T) {
 		}
 
 		// package sender and receiver are the same
-		r1 = make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
-
-		r2 = make(map[uint64][]*dkg.Round2Data, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r, err := p[i].Continue(r1)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			for id, data := range r {
-				if r2[id] == nil {
-					r2[id] = make([]*dkg.Round2Data, 0, c.maxParticipants-1)
-				}
-				r2[id] = append(r2[id], data)
-			}
-		}
+		r1 = c.runRound1(p)
+		r2 = c.runRound2(t, p, r1)
 
 		d := r2[p[0].Identifier]
 		d[3].SenderIdentifier = d[3].RecipientIdentifier
@@ -442,7 +463,21 @@ func TestParticipant_Finalize_Bad(t *testing.T) {
 			t.Fatalf("expected error %q, got %q", expectedError, err)
 		}
 
+		// some commitment has a nil element
+		r1 = c.runRound1(p)
+		r2 = c.runRound2(t, p, r1)
+
+		r1[3].Commitment[1] = nil
+		d = r2[p[0].Identifier]
+		expectedError = errCommitmentNilElement.Error() + ": 4"
+		if _, _, err := p[0].Finalize(r1, d); err == nil || err.Error() != expectedError {
+			t.Fatalf("expected error %q, got %q", expectedError, err)
+		}
+
 		// secret share is not valid with commitment
+		r1 = c.runRound1(p)
+		r2 = c.runRound2(t, p, r1)
+
 		d = r2[p[4].Identifier]
 		d[3].SecretShare = c.group.NewScalar().Random()
 		expectedError = errInvalidSecretShare.Error() + ": 4"
@@ -611,6 +646,51 @@ func TestComputeParticipantPublicKey(t *testing.T) {
 		if _, err := dkg.ComputeParticipantPublicKey(c.ciphersuite, 2, r1); err == nil ||
 			err.Error() != errCommitmentNilElement.Error() {
 			t.Fatalf("expected error %q, got %q", errCommitmentNilElement, err)
+		}
+	})
+}
+
+func TestGroupPublicKey_BadCipher(t *testing.T) {
+	errInvalidCiphersuite := errors.New("invalid ciphersuite")
+	if _, err := dkg.GroupPublicKey(dkg.Ciphersuite(2), nil); err == nil ||
+		err.Error() != errInvalidCiphersuite.Error() {
+		t.Fatalf("expected %q, got %q", errInvalidCiphersuite, err)
+	}
+}
+
+func TestPubKeyForCommitment(t *testing.T) {
+	errInvalidCiphersuite := errors.New("invalid ciphersuite")
+	testAllCases(t, func(c *testCase) {
+		p := c.makeParticipants(t)
+		r1 := p[0].Start()
+
+		if _, err := dkg.PubKeyForCommitment(2, r1.Commitment, p[0].Identifier); err == nil ||
+			err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected %q, got %q", errInvalidCiphersuite, err)
+		}
+
+		pk, err := dkg.PubKeyForCommitment(c.group, r1.Commitment, p[0].Identifier)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		pk1, err := dkg.PubKeyForCommitment(c.group, r1.Commitment, p[0].Identifier, []*group.Scalar{}...)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		pk2, err := dkg.PubKeyForCommitment(
+			c.group,
+			r1.Commitment,
+			p[0].Identifier,
+			c.group.NewScalar().SetUInt64(p[0].Identifier),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if pk.Equal(pk1) != 1 || pk.Equal(pk2) != 1 {
+			t.Fatalf("unexpected public key:\n\t1: %v\n\t2: %v\n\t3: %v\n", pk.Hex(), pk1.Hex(), pk2.Hex())
 		}
 	})
 }
