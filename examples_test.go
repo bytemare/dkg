@@ -17,7 +17,8 @@ import (
 	"github.com/bytemare/dkg"
 )
 
-// Example_dkg shows the distributed key generation procedure that must be executed by each participant to build the secret key.
+// Example_dkg shows the 3-step 2-message distributed key generation procedure that must be executed by each participant
+// to build their secret key share.
 func Example_dkg() {
 	// Each participant must be set to use the same configuration. We use (1,1) here for the demo.
 	maximumAmountOfParticipants := uint(1)

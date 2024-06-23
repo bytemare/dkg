@@ -1,3 +1,10 @@
+## Stack
+
+- Shamir Secret Sharing over ECDLP
+- Feldman's VSS
+- Pedersen DKG
+- Schnorr NIZKP Signatures
+
 ## Possible extensions
 
 ### Robustness and Security
