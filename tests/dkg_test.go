@@ -37,21 +37,7 @@ func TestCompleteDKG(t *testing.T) {
 		}
 
 		// Step 2: Continue and assemble + triage packages.
-		r2 := make(map[uint64][]*dkg.Round2Data, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r, err := p[i].Continue(r1)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// triage r2 data for Finalize()
-			for id, data := range r {
-				if r2[id] == nil {
-					r2[id] = make([]*dkg.Round2Data, 0, c.maxParticipants-1)
-				}
-				r2[id] = append(r2[id], data)
-			}
-		}
+		r2 := c.runRound2(t, p, r1)
 
 		// Step 3: Clean the proofs.
 		// This must be called by each participant on their copy of the r1DataSet.
@@ -394,22 +380,7 @@ func TestParticipant_Finalize_Bad(t *testing.T) {
 
 		// incompatible r1 and r2 dataset lengths
 		r1 = c.runRound1(p)
-
-		r2 := make(map[uint64][]*dkg.Round2Data, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r, err := p[i].Continue(r1)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// triage r2 data for Finalize()
-			for id, data := range r {
-				if r2[id] == nil {
-					r2[id] = make([]*dkg.Round2Data, 0, c.maxParticipants)
-				}
-				r2[id] = append(r2[id], data)
-			}
-		}
+		r2 := c.runRound2(t, p, r1)
 
 		// too short
 		for _, participant := range p {
@@ -533,21 +504,7 @@ func TestVerifyPublicKey(t *testing.T) {
 			r1 = append(r1, p[i].Start())
 		}
 
-		r2 := make(map[uint64][]*dkg.Round2Data, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r, err := p[i].Continue(r1)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// triage r2 data for Finalize()
-			for id, data := range r {
-				if r2[id] == nil {
-					r2[id] = make([]*dkg.Round2Data, 0, c.maxParticipants-1)
-				}
-				r2[id] = append(r2[id], data)
-			}
-		}
+		r2 := c.runRound2(t, p, r1)
 
 		keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
 		for _, participant := range p {
