@@ -1,30 +1,71 @@
-# {{.TEMPLATE}}
-[![{{.template}}](https://github.com/bytemare/{{.template}}/actions/workflows/ci.yml/badge.svg)](https://github.com/bytemare/{{.template}}/actions/workflows/ci.yml)
-[![Go Reference](https://pkg.go.dev/badge/github.com/bytemare/{{.template}}.svg)](https://pkg.go.dev/github.com/bytemare/{{.template}})
-[![codecov](https://codecov.io/gh/bytemare/{{.template}}/branch/main/graph/badge.svg?token=5bQfB0OctA)](https://codecov.io/gh/bytemare/{{.template}})
+# Distributed Key Generation
+[![dkg](https://github.com/bytemare/dkg/actions/workflows/ci.yml/badge.svg)](https://github.com/bytemare/dkg/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/bytemare/dkg.svg)](https://pkg.go.dev/github.com/bytemare/dkg)
+[![codecov](https://codecov.io/gh/bytemare/dkg/branch/main/graph/badge.svg?token=5bQfB0OctA)](https://codecov.io/gh/bytemare/dkg)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/{{.ID}}/badge)](https://www.bestpractices.dev/projects/{{.ID}})
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/bytemare/{{.template}}/badge)](https://securityscorecards.dev/viewer/?uri=github.com/bytemare/{{.template}})
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/bytemare/dkg/badge)](https://securityscorecards.dev/viewer/?uri=github.com/bytemare/dkg)
 
 ```
-  import "github.com/bytemare/{{.template}}"
+  import "github.com/bytemare/dkg"
 ```
-{{Short description}}
 
-#### What is {{.template}}?
+Package dkg provides an efficient distributed key generation system in Go, easy to use.
+It builds on the 2-round Pederson DGK and extends it with zero-knowledge proofs to protect against rogue-key attacks of
+Byzantine participants, as defined in [FROST](https://eprint.iacr.org/2020/852.pdf).
+This is secure for any _t among n_ participants in a (t,n)-threshold scheme.
 
-> {{Short Philosophy about the concept we're implementing.}}
+This effectively generates keys among participants without the need of a trusted dealer or third-party. These keys are
+generally valid keys, and can be used in [FROST](https://github.com/bytemare/frost) and [OPRFs](https://github.com/bytemare/oprf).
 
 #### References
-- {{If you have any, put links that can help know more.}}
 
-## Documentation [![Go Reference](https://pkg.go.dev/badge/github.com/bytemare/{{.template}}.svg)](https://pkg.go.dev/github.com/bytemare/{{.template}})
+- Pederson introduced the [first DKG protocol](https://link.springer.com/chapter/10.1007/3-540-46416-6_47), based on Feldman's Verifiable Secret Sharing.
+- Komlo & Goldberg [add zero-knowledge proofs](https://eprint.iacr.org/2020/852.pdf) to the Ped-DKG.
 
-You can find the documentation and usage examples in [the package doc](https://pkg.go.dev/github.com/bytemare/{{.template}}).
+## Documentation [![Go Reference](https://pkg.go.dev/badge/github.com/bytemare/dkg.svg)](https://pkg.go.dev/github.com/bytemare/dkg)
+
+You can find the documentation and usage examples in [the package doc](https://pkg.go.dev/github.com/bytemare/dkg).
+
+## Usage
+
+### Assumptions
+
+- All parties are identified with unique IDs.
+- Communicate over confidential, authenticated, and secure channels.
+- All participants honestly follow the protocol (they can, nevertheless, identify the misbehaving participant).
+
+### Setup
+
+Use the same ciphersuite for the DKG setup and the key usage in other protocol executions.
+
+### Error handling
+
+In case of an identified misbehaving participant, abort the protocol immediately. If this happens there might be a serious
+problem that must be investigated. One may re-run the protocol after excluding that participant and solving the problem.
+
+### Protocol
+
+The following steps describe how to run the DKG among participants. Note that participants maintain a state between phases.
+For each participant:
+1. Run Init()
+    - this returns a round 1 package
+    - send/broadcast this package to every other participant
+      (this might include the very same participant, in which case it will discard it)
+2. Collect all the round 1 packages from other participants
+3. Run Continue() with the collection of round 1 packages
+    - this returns round 2 packages, one destined to each other participant
+    - each package specifies the intended receiver
+    - send it to the intended receiver
+4. Collect all round 2 packages destined to the participant
+5. Run Finalize() with the collected round 1 and round 2 packages
+    - returns the participant's own secret signing share,
+      the corresponding verification/public share, and the group's public key
+6. Erase all intermediary values received and computed by the participants (including in their states)
+7. Optionally, compute the verification keys for each other participant and store them
 
 ## Versioning
 
-[SemVer](http://semver.org) is used for versioning. For the versions available, see the [tags on the repository](https://github.com/bytemare/{{.template}}/tags).
-
+[SemVer](http://semver.org) is used for versioning. For the versions available, see the [tags on the repository](https://github.com/bytemare/dkg/tags).
 
 ## Contributing
 

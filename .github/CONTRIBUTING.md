@@ -2,16 +2,16 @@
 
 ### Did you find a bug? 🐞
 
-* 🔎 Please ensure your findings have not already been reported by searching on the project repository under [Issues](https://github.com/bytemare/{{.template}}).
+* 🔎 Please ensure your findings have not already been reported by searching on the project repository under [Issues](https://github.com/bytemare/dkg).
 * If you think your findings can be complementary to an existing issue, don't hesitate to join the conversation 😃☕
-* If there's no issue addressing the problem, [open a new one](https://github.com/bytemare/{{.template}}/issues/new). Please be clear in the title and description, and add relevant information. Bonus points if you provide a **code sample** and everything needed to reproduce the issue when expected behaviour is not occurring.
+* If there's no issue addressing the problem, [open a new one](https://github.com/bytemare/dkg/issues/new). Please be clear in the title and description, and add relevant information. Bonus points if you provide a **code sample** and everything needed to reproduce the issue when expected behaviour is not occurring.
 * If possible, use the relevant issue templates.
 
 ### Do you have a fix?
 
 🎉 That's awesome! Pull requests are welcome!
 
-* Please [open an issue](https://github.com/bytemare/{{.template}}) beforehand, so we can discuss this.
+* Please [open an issue](https://github.com/bytemare/dkg) beforehand, so we can discuss this.
 * Fork this repo from `main`, and ensure your fork is up-to-date with it when submitting the PR.
 * If your changes impact the documentation, please update it accordingly.
 * If you added code that impact tests, please add tests with relevant coverage and test cases. Bonus points for fuzzing.
