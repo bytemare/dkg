@@ -245,11 +245,7 @@ func TestParticipant_Continue(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
 		// valid r1DataSet set with and without own package
 		p := c.makeParticipants(t)
-		r1 := make([]*dkg.Round1Data, c.maxParticipants)
-
-		for i := range c.maxParticipants {
-			r1[i] = p[i].Start()
-		}
+		r1 := c.runRound1(p)
 
 		if _, err := p[0].Continue(r1); err != nil {
 			t.Fatal(err)
@@ -297,11 +293,7 @@ func TestParticipant_Continue_Bad_Proof_Z(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		r1 := make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
+		r1 := c.runRound1(p)
 
 		r1[3].ProofOfKnowledge.Z = c.group.NewScalar().Random()
 		if _, err := p[1].Continue(r1); err == nil || err.Error() != expectedError {
@@ -315,11 +307,7 @@ func TestParticipant_Continue_Bad_Proof_R(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		r1 := make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
+		r1 := c.runRound1(p)
 
 		r1[2].ProofOfKnowledge.R = c.group.Base().Multiply(c.group.NewScalar().Random())
 		if _, err := p[0].Continue(r1); err == nil || err.Error() != expectedError {
@@ -333,6 +321,7 @@ func TestParticipant_Continue_Bad_Commitment(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
+
 		// bad commitment[0]
 		r1 := make([]*dkg.Round1Data, 0, c.maxParticipants)
 		for i := range c.maxParticipants {
@@ -411,8 +400,6 @@ func TestParticipant_Finalize_Bad_Round2DataElements(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		// incompatible r1 and r2 dataset lengths
 		r1 := c.runRound1(p)
 		r2 := c.runRound2(t, p, r1)
 
@@ -444,11 +431,10 @@ func TestParticipant_Finalize_Bad_Round2OwnPackage(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		// package comes from participant
 		r1 := c.runRound1(p)
 		r2 := c.runRound2(t, p, r1)
 
+		// package comes from participant
 		d := r2[p[0].Identifier]
 		d[2].SenderIdentifier = p[0].Identifier
 		d[2].RecipientIdentifier = p[1].Identifier
@@ -463,10 +449,10 @@ func TestParticipant_Finalize_Bad_Round2InvalidReceiver(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		// package is not destined to recipient
 		r1 := c.runRound1(p)
 		r2 := c.runRound2(t, p, r1)
+
+		// package is not destined to recipient
 		d := r2[p[0].Identifier]
 
 		d[2].SenderIdentifier = p[4].Identifier
@@ -483,10 +469,10 @@ func TestParticipant_Finalize_Bad_Round2FaultyPackage(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		// package sender and receiver are the same
 		r1 := c.runRound1(p)
 		r2 := c.runRound2(t, p, r1)
+
+		// package sender and receiver are the same
 		d := r2[p[0].Identifier]
 
 		d[3].SenderIdentifier = d[3].RecipientIdentifier
@@ -501,10 +487,10 @@ func TestParticipant_Finalize_Bad_CommitmentNotFound(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		// r2 package sender is not in r1 data set
 		r1 := c.runRound1(p)
 		r2 := c.runRound2(t, p, r1)
+
+		// r2 package sender is not in r1 data set
 		d := r2[p[4].Identifier]
 
 		expectedError := errCommitmentNotFound.Error() + ": 1"
@@ -519,10 +505,10 @@ func TestParticipant_Finalize_Bad_InvalidSecretShare(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		// secret share is not valid with commitment
 		r1 := c.runRound1(p)
 		r2 := c.runRound2(t, p, r1)
+
+		// secret share is not valid with commitment
 		d := r2[p[4].Identifier]
 		d[3].SecretShare = c.group.NewScalar().Random()
 
@@ -538,11 +524,10 @@ func TestParticipant_Finalize_Bad_CommitmentNilElement(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		// some commitment has a nil element
 		r1 := c.runRound1(p)
 		r2 := c.runRound2(t, p, r1)
 
+		// some commitment has a nil element
 		r1[3].Commitment[1] = nil
 		d := r2[p[0].Identifier]
 		expectedError := errInvalidSecretShare.Error() + ": 4"
@@ -605,12 +590,7 @@ func TestVerifyPublicKey_Bad_VerificationShareFailed(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
 		// id and pubkey not related
 		p := c.makeParticipants(t)
-
-		r1 := make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
-
+		r1 := c.runRound1(p)
 		r2 := c.runRound2(t, p, r1)
 
 		keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
@@ -648,12 +628,7 @@ func TestVerifyPublicKey_Bad_MissingRound1Data(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		r1 := make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
-
+		r1 := c.runRound1(p)
 		r2 := c.runRound2(t, p, r1)
 
 		keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
@@ -678,12 +653,7 @@ func TestVerifyPublicKey_Bad_MissingPackageRound1(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		r1 := make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
-
+		r1 := c.runRound1(p)
 		r2 := c.runRound2(t, p, r1)
 
 		keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
@@ -709,12 +679,7 @@ func TestVerifyPublicKey_Bad_NoCommitment(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		r1 := make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
-
+		r1 := c.runRound1(p)
 		r2 := c.runRound2(t, p, r1)
 
 		keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
@@ -740,12 +705,7 @@ func TestVerifyPublicKey_Bad_CommitmentNilElement(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-
-		r1 := make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
-
+		r1 := c.runRound1(p)
 		r2 := c.runRound2(t, p, r1)
 
 		keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
@@ -795,10 +755,7 @@ func TestComputeParticipantPublicKey_Bad_MissingPackageRound1(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-		r1 := make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
+		r1 := c.runRound1(p)
 
 		// missing package
 		r1[4] = nil
@@ -814,10 +771,7 @@ func TestComputeParticipantPublicKey_Bad_NoCommitment(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-		r1 := make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
+		r1 := c.runRound1(p)
 
 		// missing commitment
 		r1[3].Commitment = nil
@@ -833,17 +787,9 @@ func TestComputeParticipantPublicKey_Bad_CommitmentNilElement(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-		r1 := make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
+		r1 := c.runRound1(p)
 
 		// commitment with nil element
-		r1 = make([]*dkg.Round1Data, 0, c.maxParticipants)
-		for i := range c.maxParticipants {
-			r1 = append(r1, p[i].Start())
-		}
-
 		r1[4].Commitment[2] = nil
 		if _, err := dkg.ComputeParticipantPublicKey(c.ciphersuite, 1, r1); err == nil ||
 			err.Error() != errCommitmentNilElement.Error() {
