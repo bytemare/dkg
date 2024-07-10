@@ -13,16 +13,16 @@ import (
 )
 
 var (
+	errAbortInvalidSignature   = errors.New("ABORT - invalid signature")
+	errAbortInvalidSecretShare = errors.New("ABORT - invalid secret share received from peer")
 	errInvalidCiphersuite      = errors.New("invalid ciphersuite")
 	errParticipantIDZero       = errors.New("participant ID has forbidden value 0")
 	errRound1DataElements      = errors.New("invalid number of expected round 1 data packets")
 	errRound2DataElements      = errors.New("invalid number of expected round 2 data packets")
 	errRound2InvalidReceiver   = errors.New("invalid receiver in round 2 package")
-	errInvalidSignature        = errors.New("invalid signature")
 	errRound2OwnPackage        = errors.New("mixed packages: received a round 2 package from itself")
 	errRound2FaultyPackage     = errors.New("malformed Round2Data package: sender and recipient are the same")
 	errCommitmentNotFound      = errors.New("commitment not found in Round 1 data for participant")
-	errInvalidSecretShare      = errors.New("invalid secret share received from peer")
 	errVerificationShareFailed = errors.New("failed to compute correct verification share")
 	errNilPubKey               = errors.New("the provided public key is nil")
 	errMissingRound1Data       = errors.New("provided round 1 data set is empty")

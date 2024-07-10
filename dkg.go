@@ -54,16 +54,25 @@ func (c Ciphersuite) Available() bool {
 }
 
 // KeyShare identifies the sharded key share for a given participant.
-type KeyShare struct {
-	// The SecretKey of a participant (or secret share).
-	SecretKey *group.Scalar
+type KeyShare secretsharing.KeyShare
 
-	// The PublicKey of SecretKey belonging to the participant.
-	PublicKey *group.Element
-
-	// Identifier of the participant.
-	Identifier uint64
+// Identifier returns the identity for this share.
+func (s KeyShare) Identifier() uint64 {
+	return (*secretsharing.KeyShare)(&s).Identifier()
 }
+
+// SecretKey returns the participant's secret share.
+func (s KeyShare) SecretKey() *group.Scalar {
+	return (*secretsharing.KeyShare)(&s).SecretKey()
+}
+
+// Public returns the public key share and identifier corresponding to the secret key share.
+func (s KeyShare) Public() *PublicKeyShare {
+	return (*PublicKeyShare)(s.PublicKeyShare)
+}
+
+// PublicKeyShare specifies the public key of a participant identified with ID.
+type PublicKeyShare secretsharing.PublicKeyShare
 
 func checkPolynomial(threshold uint, p secretsharing.Polynomial) error {
 	if uint(len(p)) != threshold {
@@ -207,7 +216,7 @@ func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint64]*Round2Data,
 		if !verifyZKProof(p.group, peer, data.Commitment[0], data.ProofOfKnowledge) {
 			return nil, fmt.Errorf(
 				"%w: participant %v",
-				errInvalidSignature,
+				errAbortInvalidSignature,
 				peer,
 			)
 		}
@@ -227,7 +236,7 @@ func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint64]*Round2Data,
 	return r2data, nil
 }
 
-func getCommitment(r1DataSet []*Round1Data, id uint64) (secretsharing.Commitment, error) {
+func getCommitment(r1DataSet []*Round1Data, id uint64) ([]*group.Element, error) {
 	for _, r1d := range r1DataSet {
 		if r1d.SenderIdentifier == id {
 			if len(r1d.Commitment) == 0 {
@@ -257,6 +266,26 @@ func (p *Participant) checkRound2DataHeader(d *Round2Data) error {
 	return nil
 }
 
+func (p *Participant) verifyRound2Data(r1 []*Round1Data, r2 *Round2Data) (*group.Element, error) {
+	if err := p.checkRound2DataHeader(r2); err != nil {
+		return nil, err
+	}
+
+	// Find the commitment from that participant.
+	com, err := getCommitment(r1, r2.SenderIdentifier)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify the secret share is valid with regard to the commitment.
+	err = p.verifyCommitmentPublicKey(r2.SenderIdentifier, r2.SecretShare, com)
+	if err != nil {
+		return nil, err
+	}
+
+	return com[0], nil
+}
+
 // Finalize ingests the broadcast data from round 1 and the round 2 data destined for the participant,
 // and returns the participant's secret share and verification key, and the group's public key.
 func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data) (*KeyShare, *group.Element, error) {
@@ -270,56 +299,37 @@ func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data)
 
 	secretKey := p.group.NewScalar()
 	groupPublic := p.group.NewElement()
-	ids := p.group.NewScalar().SetUInt64(p.Identifier)
 
 	for _, data := range r2DataSet {
-		if err := p.checkRound2DataHeader(data); err != nil {
-			return nil, nil, err
-		}
-
-		// Find the commitment from that participant.
-		com, err := getCommitment(r1DataSet, data.SenderIdentifier)
+		peerCommitment, err := p.verifyRound2Data(r1DataSet, data)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		// Verify the secret share is valid with regard to the commitment.
-		if _err := p.verifyCommitmentPublicKey(data.SenderIdentifier, data.SecretShare, ids, com); _err != nil {
-			return nil, nil, _err
-		}
-
 		secretKey.Add(data.SecretShare)
-		groupPublic.Add(com[0])
+		groupPublic.Add(peerCommitment)
 	}
 
 	secretKey.Add(p.secretShare)
-	groupPublic.Add(p.publicShare)
 	p.secretShare.Zero()
+	groupPublic.Add(p.publicShare)
 	publicKey := p.group.Base().Multiply(secretKey)
 
 	return &KeyShare{
-		Identifier: p.Identifier,
-		SecretKey:  secretKey,
-		PublicKey:  publicKey,
+		Secret: secretKey,
+		PublicKeyShare: &secretsharing.PublicKeyShare{
+			ID:        p.Identifier,
+			PublicKey: publicKey,
+		},
 	}, groupPublic, nil
 }
 
-func (p *Participant) verifyCommitmentPublicKey(id uint64, share, ids *group.Scalar, com []*group.Element) error {
+func (p *Participant) verifyCommitmentPublicKey(id uint64, share *group.Scalar, commitment []*group.Element) error {
 	pk := p.group.Base().Multiply(share)
-
-	pkc, err := PubKeyForCommitment(p.group, com, p.Identifier, ids)
-	if err != nil {
+	if !secretsharing.Verify(p.group, id, pk, commitment) {
 		return fmt.Errorf(
 			"%w: %d",
-			err,
-			id,
-		)
-	}
-
-	if pk.Equal(pkc) != 1 {
-		return fmt.Errorf(
-			"%w: %d",
-			errInvalidSecretShare,
+			errAbortInvalidSecretShare,
 			id,
 		)
 	}
@@ -370,70 +380,6 @@ func VerifyPublicKey(c Ciphersuite, id uint64, pubKey *group.Element, r1data []*
 	return nil
 }
 
-func comPubKey(g group.Group, s *group.Scalar, pk *group.Element, commitment []*group.Element) (*group.Element, error) {
-	// if there are elements left and since j == 1, we can spare one exponentiation
-	if commitment[1] == nil {
-		return nil, errCommitmentNilElement
-	}
-
-	pk.Add(commitment[1].Copy().Multiply(s))
-
-	i := 2
-	j := uint64(1)
-
-	js := g.NewScalar()
-
-	for _, com := range commitment[i:] {
-		if com == nil {
-			return nil, errCommitmentNilElement
-		}
-
-		j++
-		js.SetUInt64(j)
-		pk.Add(com.Copy().Multiply(s.Copy().Pow(js)))
-	}
-
-	return pk, nil
-}
-
-// PubKeyForCommitment computes the public key corresponding to the commitment of participant id. ids is the scalar form
-// of id, which is set appropriately if not already provided.
-func PubKeyForCommitment(
-	g group.Group,
-	commitment []*group.Element,
-	id uint64,
-	ids ...*group.Scalar,
-) (*group.Element, error) {
-	if !Ciphersuite(g).Available() {
-		return nil, errInvalidCiphersuite
-	}
-
-	var s *group.Scalar
-	if len(ids) == 0 || ids[0] == nil {
-		s = g.NewScalar().SetUInt64(id)
-	} else {
-		s = ids[0]
-	}
-
-	pk := commitment[0].Copy()
-
-	switch {
-	// If id == 1 we can spare exponentiation and multiplications
-	case id == 1:
-		for _, com := range commitment[1:] {
-			if com == nil {
-				return nil, errCommitmentNilElement
-			}
-
-			pk.Add(com)
-		}
-	case len(commitment) >= 2:
-		return comPubKey(g, s, pk, commitment)
-	}
-
-	return pk, nil
-}
-
 // ComputeParticipantPublicKey computes the verification share for participant id given the commitments of round 1.
 func ComputeParticipantPublicKey(c Ciphersuite, id uint64, r1data []*Round1Data) (*group.Element, error) {
 	if !c.Available() {
@@ -445,8 +391,7 @@ func ComputeParticipantPublicKey(c Ciphersuite, id uint64, r1data []*Round1Data)
 	}
 
 	g := group.Group(c)
-	yi := g.NewElement().Identity()
-	idS := g.NewScalar().SetUInt64(id)
+	pk := g.NewElement().Identity()
 
 	for _, p := range r1data {
 		if p == nil {
@@ -457,13 +402,13 @@ func ComputeParticipantPublicKey(c Ciphersuite, id uint64, r1data []*Round1Data)
 			return nil, errNoCommitment
 		}
 
-		prime, err := PubKeyForCommitment(g, p.Commitment, id, idS)
+		prime, err := secretsharing.PubKeyForCommitment(g, id, p.Commitment)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w", err)
 		}
 
-		yi.Add(prime)
+		pk.Add(prime)
 	}
 
-	return yi, nil
+	return pk, nil
 }
