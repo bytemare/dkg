@@ -52,7 +52,7 @@ func TestCompleteDKG(t *testing.T) {
 		for _, participant := range p {
 			keyShare, gpk, err := participant.Finalize(r1, r2[participant.Identifier])
 			if err != nil {
-				t.Fatal()
+				t.Fatal(err)
 			}
 
 			if gpk.Equal(pubKey) != 1 {
@@ -534,7 +534,7 @@ func TestParticipant_Finalize_Bad_InvalidSecretShare(t *testing.T) {
 }
 
 func TestParticipant_Finalize_Bad_CommitmentNilElement(t *testing.T) {
-	errCommitmentNilElement := errors.New("commitment has nil element")
+	errInvalidSecretShare := errors.New("ABORT - invalid secret share received from peer")
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
@@ -545,7 +545,7 @@ func TestParticipant_Finalize_Bad_CommitmentNilElement(t *testing.T) {
 
 		r1[3].Commitment[1] = nil
 		d := r2[p[0].Identifier]
-		expectedError := errCommitmentNilElement.Error() + ": 4"
+		expectedError := errInvalidSecretShare.Error() + ": 4"
 		if _, _, err := p[0].Finalize(r1, d); err == nil || err.Error() != expectedError {
 			t.Fatalf("expected error %q, got %q", expectedError, err)
 		}

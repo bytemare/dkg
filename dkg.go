@@ -326,7 +326,7 @@ func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data)
 
 func (p *Participant) verifyCommitmentPublicKey(id uint64, share *group.Scalar, commitment []*group.Element) error {
 	pk := p.group.Base().Multiply(share)
-	if !secretsharing.Verify(p.group, id, pk, commitment) {
+	if !secretsharing.Verify(p.group, p.Identifier, pk, commitment) {
 		return fmt.Errorf(
 			"%w: %d",
 			errAbortInvalidSecretShare,
