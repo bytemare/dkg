@@ -47,15 +47,16 @@ func TestCompleteDKG(t *testing.T) {
 
 		// Step 4: Finalize and test outputs.
 		quals := []uint64{1, 3, 5}
-		keyShares := make([]secretsharing.Share, 0, len(quals))
-		pubKey, _ := dkg.GroupPublicKey(c.ciphersuite, r1)
+		keyShares := make([]*dkg.KeyShare, 0, len(quals))
+		registry := c.ciphersuite.NewPublicKeyShareRegistry(c.threshold, c.maxParticipants)
+		pubKey, _ := dkg.GroupPublicKeyFromRound1(c.ciphersuite, r1)
 		for _, participant := range p {
-			keyShare, gpk, err := participant.Finalize(r1, r2[participant.Identifier])
+			keyShare, err := participant.Finalize(r1, r2[participant.Identifier])
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			if gpk.Equal(pubKey) != 1 {
+			if keyShare.GroupPublicKey.Equal(pubKey) != 1 {
 				t.Fatalf("expected same public key")
 			}
 
@@ -63,7 +64,7 @@ func TestCompleteDKG(t *testing.T) {
 				t.Fatal("expected equality")
 			}
 
-			if err := dkg.VerifyPublicKey(c.ciphersuite, participant.Identifier, keyShare.PublicKey, r1); err != nil {
+			if err := registry.Add(keyShare.Public()); err != nil {
 				t.Fatal(err)
 			}
 
@@ -73,15 +74,30 @@ func TestCompleteDKG(t *testing.T) {
 			}
 		}
 
-		// Verify the threshold scheme by combining a subset of the shares.
-		secret, err := secretsharing.CombineShares(c.group, keyShares)
-		if err != nil {
-			t.Fatal(err)
+		{
+			commitments := registry.Commitments()
+			for _, k := range keyShares {
+				if err := dkg.VerifyPublicKey(c.ciphersuite, k.Identifier(), k.PublicKey, commitments); err != nil {
+					t.Fatal(err)
+				}
+			}
 		}
 
-		pk := c.group.Base().Multiply(secret)
-		if pk.Equal(pubKey) != 1 {
-			t.Fatal("expected recovered secret to be compatible with public key")
+		// Verify the threshold scheme by combining a subset of the shares.
+		{
+			combinedKeyShares := make([]secretsharing.Share, 0, len(quals))
+			for _, k := range keyShares {
+				combinedKeyShares = append(combinedKeyShares, k)
+			}
+			secret, err := secretsharing.CombineShares(c.group, combinedKeyShares)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			pk := c.group.Base().Multiply(secret)
+			if pk.Equal(pubKey) != 1 {
+				t.Fatal("expected recovered secret to be compatible with public key")
+			}
 		}
 	})
 }
@@ -376,7 +392,7 @@ func TestParticipant_Finalize_Bad_Round1DataElements(t *testing.T) {
 		}
 
 		for _, participant := range p {
-			if _, _, err := participant.Finalize(r1, nil); err == nil || err.Error() != errRound1DataElements.Error() {
+			if _, err := participant.Finalize(r1, nil); err == nil || err.Error() != errRound1DataElements.Error() {
 				t.Fatalf("expected error %q, got %q", errRound1DataElements, err)
 			}
 		}
@@ -388,7 +404,7 @@ func TestParticipant_Finalize_Bad_Round1DataElements(t *testing.T) {
 		r1 = append(r1, p[2].Start())
 
 		for _, participant := range p {
-			if _, _, err := participant.Finalize(r1, nil); err == nil || err.Error() != errRound1DataElements.Error() {
+			if _, err := participant.Finalize(r1, nil); err == nil || err.Error() != errRound1DataElements.Error() {
 				t.Fatalf("expected error %q, got %q", errRound1DataElements, err)
 			}
 		}
@@ -406,7 +422,7 @@ func TestParticipant_Finalize_Bad_Round2DataElements(t *testing.T) {
 		// too short
 		for _, participant := range p {
 			d := r2[participant.Identifier]
-			if _, _, err := participant.Finalize(r1, d[:len(d)-1]); err == nil ||
+			if _, err := participant.Finalize(r1, d[:len(d)-1]); err == nil ||
 				err.Error() != errRound2DataElements.Error() {
 				t.Fatalf("expected error %q, got %q", errRound2DataElements, err)
 			}
@@ -419,7 +435,7 @@ func TestParticipant_Finalize_Bad_Round2DataElements(t *testing.T) {
 				t.Fatal(err)
 			}
 			d := append(r2[participant.Identifier], r[(participant.Identifier+1)%uint64(c.maxParticipants)])
-			if _, _, err := participant.Finalize(r1, d); err == nil || err.Error() != errRound2DataElements.Error() {
+			if _, err := participant.Finalize(r1, d); err == nil || err.Error() != errRound2DataElements.Error() {
 				t.Fatalf("expected error %q, got %q", errRound2DataElements, err)
 			}
 		}
@@ -438,7 +454,7 @@ func TestParticipant_Finalize_Bad_Round2OwnPackage(t *testing.T) {
 		d := r2[p[0].Identifier]
 		d[2].SenderIdentifier = p[0].Identifier
 		d[2].RecipientIdentifier = p[1].Identifier
-		if _, _, err := p[0].Finalize(r1, d); err == nil || err.Error() != errRound2OwnPackage.Error() {
+		if _, err := p[0].Finalize(r1, d); err == nil || err.Error() != errRound2OwnPackage.Error() {
 			t.Fatalf("expected error %q, got %q", errRound2OwnPackage, err)
 		}
 	})
@@ -458,7 +474,7 @@ func TestParticipant_Finalize_Bad_Round2InvalidReceiver(t *testing.T) {
 		d[2].SenderIdentifier = p[4].Identifier
 		d[2].RecipientIdentifier = p[3].Identifier
 
-		if _, _, err := p[0].Finalize(r1, d); err == nil || err.Error() != errRound2InvalidReceiver.Error() {
+		if _, err := p[0].Finalize(r1, d); err == nil || err.Error() != errRound2InvalidReceiver.Error() {
 			t.Fatalf("expected error %q, got %q", errRound2InvalidReceiver, err)
 		}
 	})
@@ -476,7 +492,7 @@ func TestParticipant_Finalize_Bad_Round2FaultyPackage(t *testing.T) {
 		d := r2[p[0].Identifier]
 
 		d[3].SenderIdentifier = d[3].RecipientIdentifier
-		if _, _, err := p[0].Finalize(r1, d); err == nil || err.Error() != errRound2FaultyPackage.Error() {
+		if _, err := p[0].Finalize(r1, d); err == nil || err.Error() != errRound2FaultyPackage.Error() {
 			t.Fatalf("expected error %q, got %q", errRound2FaultyPackage, err)
 		}
 	})
@@ -494,7 +510,7 @@ func TestParticipant_Finalize_Bad_CommitmentNotFound(t *testing.T) {
 		d := r2[p[4].Identifier]
 
 		expectedError := errCommitmentNotFound.Error() + ": 1"
-		if _, _, err := p[4].Finalize(r1[1:], d); err == nil || err.Error() != expectedError {
+		if _, err := p[4].Finalize(r1[1:], d); err == nil || err.Error() != expectedError {
 			t.Fatalf("expected error %q, got %q", expectedError, err)
 		}
 	})
@@ -513,7 +529,7 @@ func TestParticipant_Finalize_Bad_InvalidSecretShare(t *testing.T) {
 		d[3].SecretShare = c.group.NewScalar().Random()
 
 		expectedError := errInvalidSecretShare.Error() + ": 4"
-		if _, _, err := p[4].Finalize(r1, d); err == nil || err.Error() != expectedError {
+		if _, err := p[4].Finalize(r1, d); err == nil || err.Error() != expectedError {
 			t.Fatalf("expected error %q, got %q", expectedError, err)
 		}
 	})
@@ -531,7 +547,7 @@ func TestParticipant_Finalize_Bad_CommitmentNilElement(t *testing.T) {
 		r1[3].Commitment[1] = nil
 		d := r2[p[0].Identifier]
 		expectedError := errInvalidSecretShare.Error() + ": 4"
-		if _, _, err := p[0].Finalize(r1, d); err == nil || err.Error() != expectedError {
+		if _, err := p[0].Finalize(r1, d); err == nil || err.Error() != expectedError {
 			t.Fatalf("expected error %q, got %q", expectedError, err)
 		}
 	})
@@ -550,13 +566,13 @@ func TestParticipant_Finalize_Bad_CommitmentEmpty(t *testing.T) {
 
 		r1[3].Commitment = nil
 		expectedError := errCommitmentEmpty.Error() + ": 4"
-		if _, _, err := p[0].Finalize(r1, d); err == nil || err.Error() != expectedError {
+		if _, err := p[0].Finalize(r1, d); err == nil || err.Error() != expectedError {
 			t.Fatalf("expected error %q, got %q", expectedError, err)
 		}
 
 		r1[3].Commitment = []*group.Element{}
 		expectedError = errCommitmentEmpty.Error() + ": 4"
-		if _, _, err := p[0].Finalize(r1, d); err == nil || err.Error() != expectedError {
+		if _, err := p[0].Finalize(r1, d); err == nil || err.Error() != expectedError {
 			t.Fatalf("expected error %q, got %q", expectedError, err)
 		}
 	})
@@ -589,57 +605,34 @@ func TestVerifyPublicKey_Bad_VerificationShareFailed(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		// id and pubkey not related
-		p := c.makeParticipants(t)
-		r1 := c.runRound1(p)
-		r2 := c.runRound2(t, p, r1)
+		_, _, _, keyshares, registry := completeDKG(t, c)
+		commitments := registry.Commitments()
 
-		keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
-		for _, participant := range p {
-			ks, _, err := participant.Finalize(r1, r2[participant.Identifier])
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			keyshares = append(keyshares, ks)
-		}
-
-		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[2].PublicKey, r1); err == nil ||
+		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[2].PublicKey, commitments); err == nil ||
 			!strings.HasPrefix(err.Error(), errVerificationShareFailed.Error()) {
 			t.Fatalf("expected error %q, got %q", errVerificationShareFailed, err)
 		}
 
 		// bad pubkey
-		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, c.group.NewElement(), r1); err == nil ||
+		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, c.group.NewElement(), commitments); err == nil ||
 			!strings.HasPrefix(err.Error(), errVerificationShareFailed.Error()) {
 			t.Fatalf("expected error %q, got %q", errVerificationShareFailed, err)
 		}
 
 		// bad commitment
-		r1[4].Commitment[2] = c.group.Base()
-		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[1].PublicKey, r1); err == nil ||
+		commitments[4][2] = c.group.Base()
+		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[1].PublicKey, commitments); err == nil ||
 			!strings.HasPrefix(err.Error(), errVerificationShareFailed.Error()) {
 			t.Fatalf("expected error %q, got %q", errVerificationShareFailed, err)
 		}
 	})
 }
 
-func TestVerifyPublicKey_Bad_MissingRound1Data(t *testing.T) {
-	errMissingRound1Data := errors.New("provided round 1 data set is empty")
+func TestVerifyPublicKey_Bad_MissingCommitments(t *testing.T) {
+	errMissingRound1Data := errors.New("missing commitments")
 
 	testAllCases(t, func(c *testCase) {
-		p := c.makeParticipants(t)
-		r1 := c.runRound1(p)
-		r2 := c.runRound2(t, p, r1)
-
-		keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
-		for _, participant := range p {
-			ks, _, err := participant.Finalize(r1, r2[participant.Identifier])
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			keyshares = append(keyshares, ks)
-		}
+		_, _, _, keyshares, _ := completeDKG(t, c)
 
 		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[1].PublicKey, nil); err == nil ||
 			err.Error() != errMissingRound1Data.Error() {
@@ -648,52 +641,40 @@ func TestVerifyPublicKey_Bad_MissingRound1Data(t *testing.T) {
 	})
 }
 
-func TestVerifyPublicKey_Bad_MissingPackageRound1(t *testing.T) {
-	errMissingPackageRound1 := errors.New("missing package in round 1 data set")
+func completeDKG(
+	t *testing.T,
+	c *testCase,
+) ([]*dkg.Participant, []*dkg.Round1Data, map[uint64][]*dkg.Round2Data, []*dkg.KeyShare, *dkg.PublicKeyShareRegistry) {
+	p := c.makeParticipants(t)
+	r1 := c.runRound1(p)
+	r2 := c.runRound2(t, p, r1)
 
-	testAllCases(t, func(c *testCase) {
-		p := c.makeParticipants(t)
-		r1 := c.runRound1(p)
-		r2 := c.runRound2(t, p, r1)
-
-		keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
-		for _, participant := range p {
-			ks, _, err := participant.Finalize(r1, r2[participant.Identifier])
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			keyshares = append(keyshares, ks)
+	keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
+	registry := c.ciphersuite.NewPublicKeyShareRegistry(c.threshold, c.maxParticipants)
+	for _, participant := range p {
+		ks, err := participant.Finalize(r1, r2[participant.Identifier])
+		if err != nil {
+			t.Fatal(err)
 		}
 
-		r1[4] = nil
-		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[1].PublicKey, r1); err == nil ||
-			err.Error() != errMissingPackageRound1.Error() {
-			t.Fatalf("expected error %q, got %q", errMissingPackageRound1, err)
+		if err := registry.Add(ks.Public()); err != nil {
+			t.Fatal(err)
 		}
-	})
+		keyshares = append(keyshares, ks)
+	}
+
+	return p, r1, r2, keyshares, registry
 }
 
 func TestVerifyPublicKey_Bad_NoCommitment(t *testing.T) {
-	errNoCommitment := errors.New("empty commitment in package")
+	errNoCommitment := errors.New("empty commitment")
 
 	testAllCases(t, func(c *testCase) {
-		p := c.makeParticipants(t)
-		r1 := c.runRound1(p)
-		r2 := c.runRound2(t, p, r1)
+		_, _, _, keyshares, registry := completeDKG(t, c)
+		commitments := registry.Commitments()
 
-		keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
-		for _, participant := range p {
-			ks, _, err := participant.Finalize(r1, r2[participant.Identifier])
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			keyshares = append(keyshares, ks)
-		}
-
-		r1[3].Commitment = nil
-		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[1].PublicKey, r1); err == nil ||
+		commitments[3] = nil
+		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[1].PublicKey, commitments); err == nil ||
 			err.Error() != errNoCommitment.Error() {
 			t.Fatalf("expected error %q, got %q", errNoCommitment, err)
 		}
@@ -704,22 +685,11 @@ func TestVerifyPublicKey_Bad_CommitmentNilElement(t *testing.T) {
 	errCommitmentNilElement := errors.New("commitment has nil element")
 
 	testAllCases(t, func(c *testCase) {
-		p := c.makeParticipants(t)
-		r1 := c.runRound1(p)
-		r2 := c.runRound2(t, p, r1)
+		_, _, _, keyshares, registry := completeDKG(t, c)
+		commitments := registry.Commitments()
 
-		keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
-		for _, participant := range p {
-			ks, _, err := participant.Finalize(r1, r2[participant.Identifier])
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			keyshares = append(keyshares, ks)
-		}
-
-		r1[2].Commitment[2] = nil
-		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[1].PublicKey, r1); err == nil ||
+		commitments[2][2] = nil
+		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[1].PublicKey, commitments); err == nil ||
 			err.Error() != errCommitmentNilElement.Error() {
 			t.Fatalf("expected error %q, got %q", errCommitmentNilElement, err)
 		}
@@ -739,7 +709,7 @@ func TestComputeParticipantPublicKey_Bad_InvalidCiphersuite(t *testing.T) {
 }
 
 func TestComputeParticipantPublicKey_Bad_MissingRound1Data(t *testing.T) {
-	errMissingRound1Data := errors.New("provided round 1 data set is empty")
+	errMissingRound1Data := errors.New("missing commitments")
 
 	testAllCases(t, func(c *testCase) {
 		// nil r1 data
@@ -750,32 +720,16 @@ func TestComputeParticipantPublicKey_Bad_MissingRound1Data(t *testing.T) {
 	})
 }
 
-func TestComputeParticipantPublicKey_Bad_MissingPackageRound1(t *testing.T) {
-	errMissingPackageRound1 := errors.New("missing package in round 1 data set")
-
-	testAllCases(t, func(c *testCase) {
-		p := c.makeParticipants(t)
-		r1 := c.runRound1(p)
-
-		// missing package
-		r1[4] = nil
-		if _, err := dkg.ComputeParticipantPublicKey(c.ciphersuite, 1, r1); err == nil ||
-			err.Error() != errMissingPackageRound1.Error() {
-			t.Fatalf("expected error %q, got %q", errMissingPackageRound1, err)
-		}
-	})
-}
-
 func TestComputeParticipantPublicKey_Bad_NoCommitment(t *testing.T) {
-	errNoCommitment := errors.New("empty commitment in package")
+	errNoCommitment := errors.New("empty commitment")
 
 	testAllCases(t, func(c *testCase) {
-		p := c.makeParticipants(t)
-		r1 := c.runRound1(p)
+		_, _, _, _, registry := completeDKG(t, c)
+		commitments := registry.Commitments()
 
 		// missing commitment
-		r1[3].Commitment = nil
-		if _, err := dkg.ComputeParticipantPublicKey(c.ciphersuite, 1, r1); err == nil ||
+		commitments[3] = nil
+		if _, err := dkg.ComputeParticipantPublicKey(c.ciphersuite, 1, commitments); err == nil ||
 			err.Error() != errNoCommitment.Error() {
 			t.Fatalf("expected error %q, got %q", errNoCommitment, err)
 		}
@@ -786,24 +740,18 @@ func TestComputeParticipantPublicKey_Bad_CommitmentNilElement(t *testing.T) {
 	errCommitmentNilElement := errors.New("commitment has nil element")
 
 	testAllCases(t, func(c *testCase) {
-		p := c.makeParticipants(t)
-		r1 := c.runRound1(p)
+		_, _, _, _, registry := completeDKG(t, c)
+		commitments := registry.Commitments()
 
 		// commitment with nil element
-		r1[4].Commitment[2] = nil
-		if _, err := dkg.ComputeParticipantPublicKey(c.ciphersuite, 1, r1); err == nil ||
+		commitments[4][2] = nil
+		if _, err := dkg.ComputeParticipantPublicKey(c.ciphersuite, 1, commitments); err == nil ||
 			err.Error() != errCommitmentNilElement.Error() {
 			t.Fatalf("expected error %q, got %q", errCommitmentNilElement, err)
 		}
 
-		r1[4].Commitment[1] = nil
-		if _, err := dkg.ComputeParticipantPublicKey(c.ciphersuite, 2, r1); err == nil ||
-			err.Error() != errCommitmentNilElement.Error() {
-			t.Fatalf("expected error %q, got %q", errCommitmentNilElement, err)
-		}
-
-		r1[4].Commitment[2] = nil
-		if _, err := dkg.ComputeParticipantPublicKey(c.ciphersuite, 2, r1); err == nil ||
+		commitments[4][1] = nil
+		if _, err := dkg.ComputeParticipantPublicKey(c.ciphersuite, 2, commitments); err == nil ||
 			err.Error() != errCommitmentNilElement.Error() {
 			t.Fatalf("expected error %q, got %q", errCommitmentNilElement, err)
 		}
@@ -812,7 +760,7 @@ func TestComputeParticipantPublicKey_Bad_CommitmentNilElement(t *testing.T) {
 
 func TestGroupPublicKey_BadCipher(t *testing.T) {
 	errInvalidCiphersuite := errors.New("invalid ciphersuite")
-	if _, err := dkg.GroupPublicKey(dkg.Ciphersuite(2), nil); err == nil ||
+	if _, err := dkg.GroupPublicKeyFromRound1(dkg.Ciphersuite(2), nil); err == nil ||
 		err.Error() != errInvalidCiphersuite.Error() {
 		t.Fatalf("expected %q, got %q", errInvalidCiphersuite, err)
 	}

@@ -6,7 +6,7 @@ require (
 	filippo.io/edwards25519 v1.1.0
 	github.com/bytemare/crypto v0.7.5
 	github.com/bytemare/hash v0.3.0
-	github.com/bytemare/secret-sharing v0.2.0
+	github.com/bytemare/secret-sharing v0.3.0
 	github.com/gtank/ristretto255 v0.1.2
 )
 

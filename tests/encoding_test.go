@@ -171,15 +171,15 @@ func Test_Encoding(t *testing.T) {
 	p3r2 = append(p3r2, r2P1[p3.Identifier])
 	p3r2 = append(p3r2, r2P2[p3.Identifier])
 
-	if _, _, err = p1.Finalize(p1r1, p1r2); err != nil {
+	if _, err = p1.Finalize(p1r1, p1r2); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, _, err = p2.Finalize(p2r1, p2r2); err != nil {
+	if _, err = p2.Finalize(p2r1, p2r2); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, _, err = p3.Finalize(p3r1, p3r2); err != nil {
+	if _, err = p3.Finalize(p3r1, p3r2); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -431,6 +431,103 @@ func TestRound2_Decode_Fail(t *testing.T) {
 
 		if err := r2.Decode(data); err == nil || !strings.HasPrefix(err.Error(), errDecodeSecretShare.Error()) {
 			t.Fatalf("expected error %q, got %q", errDecodeSecretShare, err)
+		}
+	})
+}
+
+func comparePublicKeyShare(p1, p2 *dkg.PublicKeyShare) error {
+	if p1.PublicKey.Equal(p2.PublicKey) != 1 {
+		return fmt.Errorf("Expected equality on PublicKey:\n\t%s\n\t%s\n", p1.PublicKey.Hex(), p2.PublicKey.Hex())
+	}
+
+	if p1.ID != p2.ID {
+		return fmt.Errorf("Expected equality on ID:\n\t%d\n\t%d\n", p1.ID, p2.ID)
+	}
+
+	if p1.Group != p2.Group {
+		return fmt.Errorf("Expected equality on Group:\n\t%v\n\t%v\n", p1.Group, p2.Group)
+	}
+
+	if len(p1.Commitment) != len(p2.Commitment) {
+		return fmt.Errorf(
+			"Expected equality on Commitment length:\n\t%d\n\t%d\n",
+			len(p1.Commitment),
+			len(p1.Commitment),
+		)
+	}
+
+	for i := range p1.Commitment {
+		if p1.Commitment[i].Equal(p2.Commitment[i]) != 1 {
+			return fmt.Errorf(
+				"Expected equality on Commitment %d:\n\t%s\n\t%s\n",
+				i,
+				p1.Commitment[i].Hex(),
+				p1.Commitment[i].Hex(),
+			)
+		}
+	}
+
+	return nil
+}
+
+func compareRegistries(r1, r2 *dkg.PublicKeyShareRegistry) error {
+	if r1.Ciphersuite != r2.Ciphersuite || r1.Total != r2.Total || r1.Threshold != r2.Threshold {
+		return errors.New("wrong header")
+	}
+
+	if r1.GroupPublicKey.Equal(r2.GroupPublicKey) != 1 {
+		return errors.New("wrong gpk")
+	}
+
+	if len(r1.PublicKeyShares) != len(r2.PublicKeyShares) {
+		return errors.New("wrong pks length")
+	}
+
+	for i, pks := range r1.PublicKeyShares {
+		pks2 := r2.PublicKeyShares[i]
+		if err := comparePublicKeyShare(pks, pks2); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func TestRegister(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, _, registry := completeDKG(t, c)
+
+		var err error
+		registry.GroupPublicKey, err = dkg.GroupPublicKeyFromCommitments(c.ciphersuite, registry.Commitments())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Bytes
+		b := registry.Encode()
+		r2 := new(dkg.PublicKeyShareRegistry)
+
+		if err = r2.Decode(b); err != nil {
+			t.Fatal(err)
+		}
+
+		if err = compareRegistries(registry, r2); err != nil {
+			t.Fatal(err)
+		}
+
+		// JSON
+		j, err := json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r2 = new(dkg.PublicKeyShareRegistry)
+		if err := json.Unmarshal(j, r2); err != nil {
+			t.Fatal(err)
+		}
+
+		if err = compareRegistries(registry, r2); err != nil {
+			t.Fatal(err)
 		}
 	})
 }

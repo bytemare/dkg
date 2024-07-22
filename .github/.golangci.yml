@@ -73,7 +73,7 @@ linters:
     - nlreturn
     - noctx
     - nolintlint
-    - nonamedreturns
+    #- nonamedreturns
     - nosprintfhostport
     - paralleltest
     - perfsprint
@@ -147,6 +147,8 @@ linters-settings:
       - opinionated
       - performance
       - style
+    disabled-checks:
+      - unnamedResult
   gocyclo:
     min-complexity: 15
   godox:
