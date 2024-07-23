@@ -455,6 +455,21 @@ func TestKeyShare_Encoding(t *testing.T) {
 	})
 }
 
+func TestKeyShare_Encoding_Bad(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		k := keyshares[0]
+		e := k.Encode()
+		e[0] = 2
+
+		d := new(dkg.KeyShare)
+		if err := d.Decode(e); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
 func TestKeyShare_EncodingJSON(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
 		_, _, _, keyshares, _ := completeDKG(t, c)
@@ -472,6 +487,24 @@ func TestKeyShare_EncodingJSON(t *testing.T) {
 
 		if err := compareKeyShares(k, d); err != nil {
 			t.Fatal(err)
+		}
+	})
+}
+
+func TestKeyShare_EncodingJSON_Bad(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		k := keyshares[0]
+		k.Group = 2
+		e, err := json.Marshal(k)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		d := new(dkg.KeyShare)
+		if err := json.Unmarshal(e, d); err == nil {
+			t.Fatal("expected error")
 		}
 	})
 }
@@ -697,19 +730,6 @@ func getBadElement(t *testing.T, g group.Group) []byte {
 	default:
 		return getBadNistElement(t, g)
 	}
-}
-
-func getBadScalar(g group.Group) []byte {
-	order := g.Order()
-	o, _ := new(big.Int).SetString(order, 0)
-	o.Add(o, new(big.Int).SetInt64(10))
-	out := make([]byte, g.ScalarLength())
-	o.FillBytes(out)
-	if g == group.Ristretto255Sha512 || g == group.Edwards25519Sha512 {
-		slices.Reverse(out)
-	}
-
-	return out
 }
 
 func TestRegistry_Decode_Bad(t *testing.T) {
