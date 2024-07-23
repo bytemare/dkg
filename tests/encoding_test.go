@@ -435,6 +435,100 @@ func TestRound2_Decode_Fail(t *testing.T) {
 	})
 }
 
+func TestKeyShare_Encoding(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		k := keyshares[0]
+		e := k.Encode()
+
+		d := new(dkg.KeyShare)
+		if err := d.Decode(e); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := compareKeyShares(k, d); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestKeyShare_EncodingJSON(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		k := keyshares[0]
+		e, err := json.Marshal(k)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		d := new(dkg.KeyShare)
+		if err := json.Unmarshal(e, d); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := compareKeyShares(k, d); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestPublicKeyShare_Encoding(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		pks := keyshares[0].Public()
+		e := pks.Encode()
+
+		d := new(dkg.PublicKeyShare)
+		if err := d.Decode(e); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := comparePublicKeyShare(pks, d); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestPublicKeyShare_JSON(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		pks := keyshares[0].Public()
+		e, err := json.Marshal(pks)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		d := new(dkg.PublicKeyShare)
+		if err := json.Unmarshal(e, d); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := comparePublicKeyShare(pks, d); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func compareKeyShares(s1, s2 *dkg.KeyShare) error {
+	if s1.Secret.Equal(s2.Secret) != 1 {
+		return fmt.Errorf("Expected equality on Secret:\n\t%s\n\t%s\n", s1.Secret.Hex(), s2.Secret.Hex())
+	}
+
+	if s1.GroupPublicKey.Equal(s2.GroupPublicKey) != 1 {
+		return fmt.Errorf(
+			"Expected equality on GroupPublicKey:\n\t%s\n\t%s\n",
+			s1.GroupPublicKey.Hex(),
+			s2.GroupPublicKey.Hex(),
+		)
+	}
+
+	return comparePublicKeyShare(s1.Public(), s2.Public())
+}
+
 func comparePublicKeyShare(p1, p2 *dkg.PublicKeyShare) error {
 	if p1.PublicKey.Equal(p2.PublicKey) != 1 {
 		return fmt.Errorf("Expected equality on PublicKey:\n\t%s\n\t%s\n", p1.PublicKey.Hex(), p2.PublicKey.Hex())

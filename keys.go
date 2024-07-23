@@ -117,12 +117,12 @@ func (c Ciphersuite) NewPublicKeyShareRegistry(threshold, total uint) *PublicKey
 // Add adds the PublicKeyShare to the registry if it's not full or no key for the identifier is already set,
 // in which case an error is returned.
 func (k *PublicKeyShareRegistry) Add(pks *PublicKeyShare) error {
-	if uint(len(k.PublicKeyShares)) == k.Total {
-		return errPublicKeyShareCapacityExceeded
-	}
-
 	if _, ok := k.PublicKeyShares[pks.ID]; ok {
 		return errPublicKeyShareRegistered
+	}
+
+	if uint(len(k.PublicKeyShares)) == k.Total {
+		return errPublicKeyShareCapacityExceeded
 	}
 
 	k.PublicKeyShares[pks.ID] = pks
@@ -152,7 +152,7 @@ func (k *PublicKeyShareRegistry) Commitments() [][]*group.Element {
 	return c
 }
 
-// VerifyPublicKey returns nil the id / pubKey pair is registered, and an error otherwise.
+// VerifyPublicKey returns nil if the id / pubKey pair is registered, and an error otherwise.
 func (k *PublicKeyShareRegistry) VerifyPublicKey(id uint64, pubKey *group.Element) error {
 	for _, ks := range k.PublicKeyShares {
 		if ks.ID == id {
