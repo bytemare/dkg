@@ -9,7 +9,9 @@
 package dkg_test
 
 import (
+	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -492,6 +494,21 @@ func TestPublicKeyShare_Encoding(t *testing.T) {
 	})
 }
 
+func TestPublicKeyShare_Encoding_Bad(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		pks := keyshares[0].Public()
+		e := pks.Encode()
+		e[0] = 2
+
+		d := new(dkg.PublicKeyShare)
+		if err := d.Decode(e); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
 func TestPublicKeyShare_JSON(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
 		_, _, _, keyshares, _ := completeDKG(t, c)
@@ -509,6 +526,25 @@ func TestPublicKeyShare_JSON(t *testing.T) {
 
 		if err := comparePublicKeyShare(pks, d); err != nil {
 			t.Fatal(err)
+		}
+	})
+}
+
+func TestPublicKeyShare_JSON_Bad(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		pks := keyshares[0].Public()
+		pks.Group = 0
+
+		e, err := json.Marshal(pks)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		d := new(dkg.PublicKeyShare)
+		if err := json.Unmarshal(e, d); err == nil {
+			t.Fatal("expected error")
 		}
 	})
 }
@@ -587,25 +623,19 @@ func compareRegistries(r1, r2 *dkg.PublicKeyShareRegistry) error {
 	return nil
 }
 
-func TestRegister(t *testing.T) {
+func TestRegistry_Encoding(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
 		_, _, _, _, registry := completeDKG(t, c)
-
-		var err error
-		registry.GroupPublicKey, err = dkg.GroupPublicKeyFromCommitments(c.ciphersuite, registry.Commitments())
-		if err != nil {
-			t.Fatal(err)
-		}
 
 		// Bytes
 		b := registry.Encode()
 		r2 := new(dkg.PublicKeyShareRegistry)
 
-		if err = r2.Decode(b); err != nil {
+		if err := r2.Decode(b); err != nil {
 			t.Fatal(err)
 		}
 
-		if err = compareRegistries(registry, r2); err != nil {
+		if err := compareRegistries(registry, r2); err != nil {
 			t.Fatal(err)
 		}
 
@@ -616,6 +646,203 @@ func TestRegister(t *testing.T) {
 		}
 
 		r2 = new(dkg.PublicKeyShareRegistry)
+		if err := json.Unmarshal(j, r2); err != nil {
+			t.Fatal(err)
+		}
+
+		if err = compareRegistries(registry, r2); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func getBadNistElement(t *testing.T, g group.Group) []byte {
+	element := make([]byte, g.ElementLength())
+	if _, err := rand.Read(element); err != nil {
+		// We can as well not panic and try again in a loop and a counter to stop.
+		panic(fmt.Errorf("unexpected error in generating random bytes : %w", err))
+	}
+	// detag compression
+	element[0] = 4
+
+	// test if invalid compression is detected
+	err := g.NewElement().Decode(element)
+	if err == nil {
+		t.Errorf("detagged compressed point did not yield an error for group %s", g)
+	}
+
+	return element
+}
+
+func getBadRistrettoElement() []byte {
+	a := "2a292df7e32cababbd9de088d1d1abec9fc0440f637ed2fba145094dc14bea08"
+	decoded, _ := hex.DecodeString(a)
+
+	return decoded
+}
+
+func getBadEdwardsElement() []byte {
+	a := "efffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"
+	decoded, _ := hex.DecodeString(a)
+
+	return decoded
+}
+
+func getBadElement(t *testing.T, g group.Group) []byte {
+	switch g {
+	case group.Ristretto255Sha512:
+		return getBadRistrettoElement()
+	case group.Edwards25519Sha512:
+		return getBadEdwardsElement()
+	default:
+		return getBadNistElement(t, g)
+	}
+}
+
+func getBadScalar(g group.Group) []byte {
+	order := g.Order()
+	o, _ := new(big.Int).SetString(order, 0)
+	o.Add(o, new(big.Int).SetInt64(10))
+	out := make([]byte, g.ScalarLength())
+	o.FillBytes(out)
+	if g == group.Ristretto255Sha512 || g == group.Edwards25519Sha512 {
+		slices.Reverse(out)
+	}
+
+	return out
+}
+
+func TestRegistry_Decode_Bad(t *testing.T) {
+	errEncodingInvalidLength := errors.New("invalid encoding length")
+	errInvalidCiphersuite := errors.New("invalid ciphersuite")
+	errEncodingPKSDuplication := errors.New("multiple encoded public key shares with same ID")
+	errEncodingInvalidJSONEncoding := errors.New("invalid JSON encoding")
+
+	testAllCases(t, func(c *testCase) {
+		_, _, _, _, registry := completeDKG(t, c)
+		d := new(dkg.PublicKeyShareRegistry)
+		badElement := getBadElement(t, c.group)
+
+		// too short
+		if err := d.Decode([]byte{1, 2, 3}); err == nil || err.Error() != errEncodingInvalidLength.Error() {
+			t.Fatalf("expected error %q, got %q", errEncodingInvalidLength, err)
+		}
+
+		// invalid ciphersuite
+		e := registry.Encode()
+		e[0] = 2
+
+		if err := d.Decode(e); err == nil || err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected error %q, got %q", errInvalidCiphersuite, err)
+		}
+
+		// too short
+		e = registry.Encode()
+		l := len(e) - 5
+
+		if err := d.Decode(e[:l]); err == nil || err.Error() != errEncodingInvalidLength.Error() {
+			t.Fatalf("expected error %q, got %q", errEncodingInvalidLength, err)
+		}
+
+		// Decode: Bad public key
+		e = registry.Encode()
+		e = slices.Replace(e, 5, 5+c.group.ElementLength(), badElement...)
+		expectedErrorPrefix := errors.New("invalid group public key encoding")
+		if err := d.Decode(e); err == nil || !strings.HasPrefix(err.Error(), expectedErrorPrefix.Error()) {
+			t.Fatalf("expected error %q, got %q", expectedErrorPrefix, err)
+		}
+
+		// Decode: a faulty public key share, with a wrong group
+		e = registry.Encode()
+		e[5+c.group.ElementLength()] = 2
+		expectedErrorPrefix = errors.New("could not decode public key share")
+		if err := d.Decode(e); err == nil || !strings.HasPrefix(err.Error(), expectedErrorPrefix.Error()) {
+			t.Fatalf("expected error %q, got %q", expectedErrorPrefix, err)
+		}
+
+		// Decode: double entry, replacing the 2nd share with the third
+		pks1 := registry.PublicKeyShares[1].Encode()
+		pks2 := registry.PublicKeyShares[2].Encode()
+		pks3 := registry.PublicKeyShares[3].Encode()
+		start := 5 + c.group.ElementLength() + len(pks1)
+		end := start + len(pks2)
+		e = registry.Encode()
+
+		// Since we're using a map, we're not ensured to have the same order in encoding. So we force
+		// two consecutive writes.
+		e = slices.Replace(e, start, end, pks3...)
+		e = slices.Replace(e, end, end+len(pks3), pks3...)
+
+		if err := d.Decode(e); err == nil || err.Error() != errEncodingPKSDuplication.Error() {
+			t.Fatalf("expected error %q, got %q", errEncodingPKSDuplication, err)
+		}
+
+		// JSON: bad json
+		data, err := json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		data = replaceStringInBytes(data, "\"ciphersuite\"", "bad")
+		expectedErrorPrefix = errors.New("invalid character 'b' looking for beginning of object key string")
+
+		if err = json.Unmarshal(data, d); err == nil || !strings.HasPrefix(err.Error(), expectedErrorPrefix.Error()) {
+			t.Fatalf("expected error %q, got %q", expectedErrorPrefix, err)
+		}
+
+		// UnmarshallJSON: bad group
+		data, err = json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		data = replaceStringInBytes(data, fmt.Sprintf("\"ciphersuite\":%d", registry.Ciphersuite), "\"ciphersuite\":70")
+		if err = json.Unmarshal(data, d); err == nil || err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected error %q, got %q", errInvalidCiphersuite, err)
+		}
+
+		// UnmarshallJSON: bad group
+		data, err = json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		data = replaceStringInBytes(data, fmt.Sprintf("\"ciphersuite\":%d", c.group), "\"ciphersuite\":17")
+		if err = json.Unmarshal(data, d); err == nil || err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected error %q, got %q", errInvalidCiphersuite, err)
+		}
+
+		// UnmarshallJSON: bad group encoding
+		data, err = json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		data = replaceStringInBytes(data, fmt.Sprintf("\"ciphersuite\":%d", c.group), "\"ciphersuite\":-1")
+		if err = json.Unmarshal(data, d); err == nil || err.Error() != errEncodingInvalidJSONEncoding.Error() {
+			t.Fatalf("expected error %q, got %q", errEncodingInvalidJSONEncoding, err)
+		}
+	})
+}
+
+func replaceStringInBytes(data []byte, old, new string) []byte {
+	s := string(data)
+	s = strings.Replace(s, old, new, 1)
+
+	return []byte(s)
+}
+
+func TestRegistry_JSON(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, _, registry := completeDKG(t, c)
+
+		// JSON
+		j, err := json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r2 := new(dkg.PublicKeyShareRegistry)
 		if err := json.Unmarshal(j, r2); err != nil {
 			t.Fatal(err)
 		}

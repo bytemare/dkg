@@ -165,7 +165,7 @@ func (k *PublicKeyShareRegistry) VerifyPublicKey(id uint64, pubKey *group.Elemen
 			}
 
 			if ks.PublicKey.Equal(pubKey) != 1 {
-				return fmt.Errorf("%w for %d", errVerifyBadPubKey, id)
+				return fmt.Errorf("%w for ID %d", errVerifyBadPubKey, id)
 			}
 
 			return nil
@@ -175,7 +175,7 @@ func (k *PublicKeyShareRegistry) VerifyPublicKey(id uint64, pubKey *group.Elemen
 	return fmt.Errorf("%w: %q", errVerifyUnknownID, id)
 }
 
-func registerByteSize(c Ciphersuite, threshold, total uint) (int, int) {
+func registryByteSize(c Ciphersuite, threshold, total uint) (int, int) {
 	g := group.Group(c)
 	eLen := g.ElementLength()
 	pksLen := 1 + 8 + 4 + eLen + int(threshold)*eLen
@@ -185,7 +185,7 @@ func registerByteSize(c Ciphersuite, threshold, total uint) (int, int) {
 
 // Encode serializes the registry into a compact byte encoding of the registry, suitable for storage or transmissions.
 func (k *PublicKeyShareRegistry) Encode() []byte {
-	size, _ := registerByteSize(k.Ciphersuite, k.Threshold, k.Total)
+	size, _ := registryByteSize(k.Ciphersuite, k.Threshold, k.Total)
 	out := make([]byte, 5, size)
 	out[0] = byte(k.Ciphersuite)
 	binary.LittleEndian.PutUint16(out[1:3], uint16(k.Total))
@@ -196,14 +196,10 @@ func (k *PublicKeyShareRegistry) Encode() []byte {
 		out = append(out, pks.Encode()...)
 	}
 
-	if len(out) != size {
-		panic(errRegistryEncodingUnexpectedLength)
-	}
-
 	return out
 }
 
-// Decode deserializes the input data into the registry, expected the same encoding as used in Encode(). It doesn't
+// Decode deserializes the input data into the registry, expecting the same encoding as used in Encode(). It doesn't
 // modify the receiver when encountering an error.
 func (k *PublicKeyShareRegistry) Decode(data []byte) error {
 	if len(data) < 5 {
@@ -217,7 +213,7 @@ func (k *PublicKeyShareRegistry) Decode(data []byte) error {
 
 	total := uint(binary.LittleEndian.Uint16(data[1:3]))
 	threshold := uint(binary.LittleEndian.Uint16(data[3:5]))
-	size, pksLen := registerByteSize(c, threshold, total)
+	size, pksLen := registryByteSize(c, threshold, total)
 
 	if len(data) != size {
 		return errEncodingInvalidLength
@@ -257,7 +253,7 @@ func (k *PublicKeyShareRegistry) Decode(data []byte) error {
 	return nil
 }
 
-type registerShadow PublicKeyShareRegistry
+type registryShadow PublicKeyShareRegistry
 
 // UnmarshalJSON reads the input data as JSON and deserializes it into the receiver. It doesn't modify the receiver when
 // encountering an error.
@@ -269,7 +265,7 @@ func (k *PublicKeyShareRegistry) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
-	r := new(registerShadow)
+	r := new(registryShadow)
 	r.GroupPublicKey = group.Group(c).NewElement()
 
 	if err = json.Unmarshal(data, r); err != nil {
@@ -281,24 +277,16 @@ func (k *PublicKeyShareRegistry) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func jsonReGetField(key, s, catch string) (string, error) {
-	r := fmt.Sprintf(`%q:%s`, key, catch)
-	re := regexp.MustCompile(r)
+// jsonReGetGroup attempts to find the Ciphersuite JSON encoding in s.
+func jsonReGetGroup(s string) (Ciphersuite, error) {
+	re := regexp.MustCompile(`"ciphersuite":(\w+)`)
 	matches := re.FindStringSubmatch(s)
 
 	if len(matches) != 2 {
-		return "", errEncodingInvalidJSONEncoding
+		return 0, errEncodingInvalidJSONEncoding
 	}
 
-	return matches[1], nil
-}
-
-// jsonReGetGroup attempts to find the Ciphersuite JSON encoding in s.
-func jsonReGetGroup(s string) (Ciphersuite, error) {
-	f, err := jsonReGetField("ciphersuite", s, `(\w+)`)
-	if err != nil {
-		return 0, err
-	}
+	f := matches[1]
 
 	i, err := strconv.Atoi(f)
 	if err != nil {

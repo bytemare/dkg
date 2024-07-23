@@ -93,7 +93,7 @@ func Example_dkg() {
 		// A participant extracts its public key share and sends it to the others or the coordinator.
 		pks := ks.Public()
 
-		// Anyone can maintain a register, and add keys for a setup.
+		// Anyone can maintain a registry, and add keys for a setup.
 		if err = PublicKeyShareRegistry.Add(pks); err != nil {
 			panic(err)
 		}

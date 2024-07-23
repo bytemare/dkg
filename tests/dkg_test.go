@@ -10,6 +10,7 @@ package dkg_test
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -144,12 +145,37 @@ func (c *testCase) runRound2(t *testing.T, p []*dkg.Participant, r1 []*dkg.Round
 	return r2
 }
 
+func (c *testCase) finalize(
+	t *testing.T,
+	participants []*dkg.Participant,
+	r1 []*dkg.Round1Data,
+	r2 map[uint64][]*dkg.Round2Data,
+) []*dkg.KeyShare {
+	keyShares := make([]*dkg.KeyShare, 0, c.maxParticipants)
+	for _, participant := range participants {
+		ks, err := participant.Finalize(r1, r2[participant.Identifier])
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		keyShares = append(keyShares, ks)
+	}
+
+	return keyShares
+}
+
 func makeRegistry(t *testing.T, c *testCase, keyShares []*dkg.KeyShare) *dkg.PublicKeyShareRegistry {
 	registry := c.ciphersuite.NewPublicKeyShareRegistry(c.threshold, c.maxParticipants)
 	for _, keyShare := range keyShares {
 		if err := registry.Add(keyShare.Public()); err != nil {
 			t.Fatal(err)
 		}
+	}
+
+	var err error
+	registry.GroupPublicKey, err = dkg.GroupPublicKeyFromCommitments(c.ciphersuite, registry.Commitments())
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	return registry
@@ -162,20 +188,10 @@ func completeDKG(
 	p := c.makeParticipants(t)
 	r1 := c.runRound1(p)
 	r2 := c.runRound2(t, p, r1)
+	keyShares := c.finalize(t, p, r1, r2)
+	registry := makeRegistry(t, c, keyShares)
 
-	keyshares := make([]*dkg.KeyShare, 0, c.maxParticipants)
-	for _, participant := range p {
-		ks, err := participant.Finalize(r1, r2[participant.Identifier])
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		keyshares = append(keyshares, ks)
-	}
-
-	registry := makeRegistry(t, c, keyshares)
-
-	return p, r1, r2, keyshares, registry
+	return p, r1, r2, keyShares, registry
 }
 
 func TestCiphersuite_Available(t *testing.T) {
@@ -832,6 +848,42 @@ func TestRegistry_Get(t *testing.T) {
 		id = c.maxParticipants + 1
 		if registry.Get(uint64(id)) != nil {
 			t.Fatalf("Get returned non-nil: %d", id)
+		}
+	})
+}
+
+func TestRegistry_VerifyPublicKey(t *testing.T) {
+	errNilPubKey := errors.New("the provided public key is nil")
+	errRegistryHasNilPublicKey := errors.New("encountered a nil public key in registry")
+	errVerifyBadPubKey := errors.New("the public key differs from the one registered")
+	errVerifyUnknownID := errors.New("the requested identifier is not registered")
+	testAllCases(t, func(c *testCase) {
+		_, _, _, _, registry := completeDKG(t, c)
+		id := uint64(1)
+		pk := registry.PublicKeyShares[id].PublicKey
+
+		if err := registry.VerifyPublicKey(id, pk); err != nil {
+			t.Fatalf("unexpected error %q", err)
+		}
+
+		if err := registry.VerifyPublicKey(id, nil); err == nil || err.Error() != errNilPubKey.Error() {
+			t.Fatalf("expecter error %q, got %q", errNilPubKey, err)
+		}
+
+		expected := fmt.Errorf("%w for ID %d", errVerifyBadPubKey, id)
+		if err := registry.VerifyPublicKey(id, c.group.NewElement()); err == nil || err.Error() != expected.Error() {
+			t.Fatalf("expecter error %q, got %q", expected, err)
+		}
+
+		registry.PublicKeyShares[1].PublicKey = nil
+		expected = fmt.Errorf("%w for ID %d", errRegistryHasNilPublicKey, id)
+		if err := registry.VerifyPublicKey(id, c.group.NewElement()); err == nil || err.Error() != expected.Error() {
+			t.Fatalf("expecter error %q, got %q", expected, err)
+		}
+
+		expected = fmt.Errorf("%w: %q", errVerifyUnknownID, 0)
+		if err := registry.VerifyPublicKey(0, c.group.NewElement()); err == nil || err.Error() != expected.Error() {
+			t.Fatalf("expecter error %q, got %q", expected, err)
 		}
 	})
 }
