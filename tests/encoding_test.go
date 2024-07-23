@@ -735,6 +735,7 @@ func getBadElement(t *testing.T, g group.Group) []byte {
 func TestRegistry_Decode_Bad(t *testing.T) {
 	errEncodingInvalidLength := errors.New("invalid encoding length")
 	errInvalidCiphersuite := errors.New("invalid ciphersuite")
+	errInvalidGroup := errors.New("invalid group identifier")
 	errEncodingPKSDuplication := errors.New("multiple encoded public key shares with same ID")
 	errEncodingInvalidJSONEncoding := errors.New("invalid JSON encoding")
 
@@ -816,12 +817,23 @@ func TestRegistry_Decode_Bad(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		data = replaceStringInBytes(data, fmt.Sprintf("\"group\":%d", registry.Ciphersuite), "\"group\":2")
+		if err = json.Unmarshal(data, d); err == nil || err.Error() != errInvalidGroup.Error() {
+			t.Fatalf("expected error %q, got %q", errInvalidGroup, err)
+		}
+
+		// UnmarshallJSON: bad ciphersuite
+		data, err = json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
 		data = replaceStringInBytes(data, fmt.Sprintf("\"ciphersuite\":%d", registry.Ciphersuite), "\"ciphersuite\":70")
 		if err = json.Unmarshal(data, d); err == nil || err.Error() != errInvalidCiphersuite.Error() {
 			t.Fatalf("expected error %q, got %q", errInvalidCiphersuite, err)
 		}
 
-		// UnmarshallJSON: bad group
+		// UnmarshallJSON: bad ciphersuite
 		data, err = json.Marshal(registry)
 		if err != nil {
 			t.Fatal(err)
@@ -832,7 +844,7 @@ func TestRegistry_Decode_Bad(t *testing.T) {
 			t.Fatalf("expected error %q, got %q", errInvalidCiphersuite, err)
 		}
 
-		// UnmarshallJSON: bad group encoding
+		// UnmarshallJSON: bad ciphersuite
 		data, err = json.Marshal(registry)
 		if err != nil {
 			t.Fatal(err)
