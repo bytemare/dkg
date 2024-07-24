@@ -854,6 +854,23 @@ func TestRegistry_Decode_Bad(t *testing.T) {
 		if err = json.Unmarshal(data, d); err == nil || err.Error() != errEncodingInvalidJSONEncoding.Error() {
 			t.Fatalf("expected error %q, got %q", errEncodingInvalidJSONEncoding, err)
 		}
+
+		// UnmarshallJSON: bad ciphersuite
+		data, err = json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		overflow := "9223372036854775808" // MaxInt64 + 1
+		data = replaceStringInBytes(data, fmt.Sprintf("\"ciphersuite\":%d", c.group), "\"ciphersuite\":"+overflow)
+
+		expectedErrorPrefix = errors.New(
+			"failed to read Group: strconv.Atoi: parsing \"9223372036854775808\": value out of range",
+		)
+
+		if err = json.Unmarshal(data, d); err == nil || !strings.HasPrefix(err.Error(), expectedErrorPrefix.Error()) {
+			t.Fatalf("expected error %q, got %q", expectedErrorPrefix, err)
+		}
 	})
 }
 
