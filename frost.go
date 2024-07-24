@@ -140,7 +140,6 @@ func h2ristretto255(input []byte) *group.Scalar {
 
 func h2ed25519(input []byte) *group.Scalar {
 	h := hash.FromCrypto(group.Edwards25519Sha512.HashFunc()).Hash(input)
-
 	s := edwards25519.NewScalar()
 	_, _ = s.SetUniformBytes(h) //nolint:errcheck // Unreachable error: h will always be of the right length.
 

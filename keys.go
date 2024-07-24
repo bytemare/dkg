@@ -290,7 +290,6 @@ func jsonReGetGroup(s string) (Ciphersuite, error) {
 
 	i, err := strconv.Atoi(f)
 	if err != nil {
-		// This can't happen because of JSON's preprocessing checks.
 		return 0, fmt.Errorf("failed to read Group: %w", err)
 	}
 
