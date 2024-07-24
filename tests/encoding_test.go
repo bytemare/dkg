@@ -6,10 +6,12 @@
 // LICENSE file in the root directory of this source tree or at
 // https://spdx.org/licenses/MIT.html
 
-package tests_test
+package dkg_test
 
 import (
+	"crypto/rand"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -171,15 +173,15 @@ func Test_Encoding(t *testing.T) {
 	p3r2 = append(p3r2, r2P1[p3.Identifier])
 	p3r2 = append(p3r2, r2P2[p3.Identifier])
 
-	if _, _, err = p1.Finalize(p1r1, p1r2); err != nil {
+	if _, err = p1.Finalize(p1r1, p1r2); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, _, err = p2.Finalize(p2r1, p2r2); err != nil {
+	if _, err = p2.Finalize(p2r1, p2r2); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, _, err = p3.Finalize(p3r1, p3r2); err != nil {
+	if _, err = p3.Finalize(p3r1, p3r2); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -431,6 +433,471 @@ func TestRound2_Decode_Fail(t *testing.T) {
 
 		if err := r2.Decode(data); err == nil || !strings.HasPrefix(err.Error(), errDecodeSecretShare.Error()) {
 			t.Fatalf("expected error %q, got %q", errDecodeSecretShare, err)
+		}
+	})
+}
+
+func TestKeyShare_Encoding(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		k := keyshares[0]
+		e := k.Encode()
+
+		d := new(dkg.KeyShare)
+		if err := d.Decode(e); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := compareKeyShares(k, d); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestKeyShare_Encoding_Bad(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		k := keyshares[0]
+		e := k.Encode()
+		e[0] = 2
+
+		d := new(dkg.KeyShare)
+		if err := d.Decode(e); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestKeyShare_EncodingJSON(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		k := keyshares[0]
+		e, err := json.Marshal(k)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		d := new(dkg.KeyShare)
+		if err := json.Unmarshal(e, d); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := compareKeyShares(k, d); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestKeyShare_EncodingJSON_Bad(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		k := keyshares[0]
+		k.Group = 2
+		e, err := json.Marshal(k)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		d := new(dkg.KeyShare)
+		if err := json.Unmarshal(e, d); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestPublicKeyShare_Encoding(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		pks := keyshares[0].Public()
+		e := pks.Encode()
+
+		d := new(dkg.PublicKeyShare)
+		if err := d.Decode(e); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := comparePublicKeyShare(pks, d); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestPublicKeyShare_Encoding_Bad(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		pks := keyshares[0].Public()
+		e := pks.Encode()
+		e[0] = 2
+
+		d := new(dkg.PublicKeyShare)
+		if err := d.Decode(e); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func TestPublicKeyShare_JSON(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		pks := keyshares[0].Public()
+		e, err := json.Marshal(pks)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		d := new(dkg.PublicKeyShare)
+		if err := json.Unmarshal(e, d); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := comparePublicKeyShare(pks, d); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func TestPublicKeyShare_JSON_Bad(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, keyshares, _ := completeDKG(t, c)
+
+		pks := keyshares[0].Public()
+		pks.Group = 0
+
+		e, err := json.Marshal(pks)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		d := new(dkg.PublicKeyShare)
+		if err := json.Unmarshal(e, d); err == nil {
+			t.Fatal("expected error")
+		}
+	})
+}
+
+func compareKeyShares(s1, s2 *dkg.KeyShare) error {
+	if s1.Secret.Equal(s2.Secret) != 1 {
+		return fmt.Errorf("Expected equality on Secret:\n\t%s\n\t%s\n", s1.Secret.Hex(), s2.Secret.Hex())
+	}
+
+	if s1.GroupPublicKey.Equal(s2.GroupPublicKey) != 1 {
+		return fmt.Errorf(
+			"Expected equality on GroupPublicKey:\n\t%s\n\t%s\n",
+			s1.GroupPublicKey.Hex(),
+			s2.GroupPublicKey.Hex(),
+		)
+	}
+
+	return comparePublicKeyShare(s1.Public(), s2.Public())
+}
+
+func comparePublicKeyShare(p1, p2 *dkg.PublicKeyShare) error {
+	if p1.PublicKey.Equal(p2.PublicKey) != 1 {
+		return fmt.Errorf("Expected equality on PublicKey:\n\t%s\n\t%s\n", p1.PublicKey.Hex(), p2.PublicKey.Hex())
+	}
+
+	if p1.ID != p2.ID {
+		return fmt.Errorf("Expected equality on ID:\n\t%d\n\t%d\n", p1.ID, p2.ID)
+	}
+
+	if p1.Group != p2.Group {
+		return fmt.Errorf("Expected equality on Group:\n\t%v\n\t%v\n", p1.Group, p2.Group)
+	}
+
+	if len(p1.Commitment) != len(p2.Commitment) {
+		return fmt.Errorf(
+			"Expected equality on Commitment length:\n\t%d\n\t%d\n",
+			len(p1.Commitment),
+			len(p1.Commitment),
+		)
+	}
+
+	for i := range p1.Commitment {
+		if p1.Commitment[i].Equal(p2.Commitment[i]) != 1 {
+			return fmt.Errorf(
+				"Expected equality on Commitment %d:\n\t%s\n\t%s\n",
+				i,
+				p1.Commitment[i].Hex(),
+				p1.Commitment[i].Hex(),
+			)
+		}
+	}
+
+	return nil
+}
+
+func compareRegistries(r1, r2 *dkg.PublicKeyShareRegistry) error {
+	if r1.Ciphersuite != r2.Ciphersuite || r1.Total != r2.Total || r1.Threshold != r2.Threshold {
+		return errors.New("wrong header")
+	}
+
+	if r1.GroupPublicKey.Equal(r2.GroupPublicKey) != 1 {
+		return errors.New("wrong gpk")
+	}
+
+	if len(r1.PublicKeyShares) != len(r2.PublicKeyShares) {
+		return errors.New("wrong pks length")
+	}
+
+	for i, pks := range r1.PublicKeyShares {
+		pks2 := r2.PublicKeyShares[i]
+		if err := comparePublicKeyShare(pks, pks2); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func TestRegistry_Encoding(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, _, registry := completeDKG(t, c)
+
+		// Bytes
+		b := registry.Encode()
+		r2 := new(dkg.PublicKeyShareRegistry)
+
+		if err := r2.Decode(b); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := compareRegistries(registry, r2); err != nil {
+			t.Fatal(err)
+		}
+
+		// JSON
+		j, err := json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r2 = new(dkg.PublicKeyShareRegistry)
+		if err := json.Unmarshal(j, r2); err != nil {
+			t.Fatal(err)
+		}
+
+		if err = compareRegistries(registry, r2); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+func getBadNistElement(t *testing.T, g group.Group) []byte {
+	element := make([]byte, g.ElementLength())
+	if _, err := rand.Read(element); err != nil {
+		// We can as well not panic and try again in a loop and a counter to stop.
+		panic(fmt.Errorf("unexpected error in generating random bytes : %w", err))
+	}
+	// detag compression
+	element[0] = 4
+
+	// test if invalid compression is detected
+	err := g.NewElement().Decode(element)
+	if err == nil {
+		t.Errorf("detagged compressed point did not yield an error for group %s", g)
+	}
+
+	return element
+}
+
+func getBadRistrettoElement() []byte {
+	a := "2a292df7e32cababbd9de088d1d1abec9fc0440f637ed2fba145094dc14bea08"
+	decoded, _ := hex.DecodeString(a)
+
+	return decoded
+}
+
+func getBadEdwardsElement() []byte {
+	a := "efffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f"
+	decoded, _ := hex.DecodeString(a)
+
+	return decoded
+}
+
+func getBadElement(t *testing.T, g group.Group) []byte {
+	switch g {
+	case group.Ristretto255Sha512:
+		return getBadRistrettoElement()
+	case group.Edwards25519Sha512:
+		return getBadEdwardsElement()
+	default:
+		return getBadNistElement(t, g)
+	}
+}
+
+func TestRegistry_Decode_Bad(t *testing.T) {
+	errEncodingInvalidLength := errors.New("invalid encoding length")
+	errInvalidCiphersuite := errors.New("invalid ciphersuite")
+	errInvalidGroup := errors.New("invalid group identifier")
+	errEncodingPKSDuplication := errors.New("multiple encoded public key shares with same ID")
+	errEncodingInvalidJSONEncoding := errors.New("invalid JSON encoding")
+
+	testAllCases(t, func(c *testCase) {
+		_, _, _, _, registry := completeDKG(t, c)
+		d := new(dkg.PublicKeyShareRegistry)
+		badElement := getBadElement(t, c.group)
+
+		// too short
+		if err := d.Decode([]byte{1, 2, 3}); err == nil || err.Error() != errEncodingInvalidLength.Error() {
+			t.Fatalf("expected error %q, got %q", errEncodingInvalidLength, err)
+		}
+
+		// invalid ciphersuite
+		e := registry.Encode()
+		e[0] = 2
+
+		if err := d.Decode(e); err == nil || err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected error %q, got %q", errInvalidCiphersuite, err)
+		}
+
+		// too short
+		e = registry.Encode()
+		l := len(e) - 5
+
+		if err := d.Decode(e[:l]); err == nil || err.Error() != errEncodingInvalidLength.Error() {
+			t.Fatalf("expected error %q, got %q", errEncodingInvalidLength, err)
+		}
+
+		// Decode: Bad public key
+		e = registry.Encode()
+		e = slices.Replace(e, 5, 5+c.group.ElementLength(), badElement...)
+		expectedErrorPrefix := errors.New("invalid group public key encoding")
+		if err := d.Decode(e); err == nil || !strings.HasPrefix(err.Error(), expectedErrorPrefix.Error()) {
+			t.Fatalf("expected error %q, got %q", expectedErrorPrefix, err)
+		}
+
+		// Decode: a faulty public key share, with a wrong group
+		e = registry.Encode()
+		e[5+c.group.ElementLength()] = 2
+		expectedErrorPrefix = errors.New("could not decode public key share")
+		if err := d.Decode(e); err == nil || !strings.HasPrefix(err.Error(), expectedErrorPrefix.Error()) {
+			t.Fatalf("expected error %q, got %q", expectedErrorPrefix, err)
+		}
+
+		// Decode: double entry, replacing the 2nd share with the third
+		pks1 := registry.PublicKeyShares[1].Encode()
+		pks2 := registry.PublicKeyShares[2].Encode()
+		pks3 := registry.PublicKeyShares[3].Encode()
+		start := 5 + c.group.ElementLength() + len(pks1)
+		end := start + len(pks2)
+		e = registry.Encode()
+
+		// Since we're using a map, we're not ensured to have the same order in encoding. So we force
+		// two consecutive writes.
+		e = slices.Replace(e, start, end, pks3...)
+		e = slices.Replace(e, end, end+len(pks3), pks3...)
+
+		if err := d.Decode(e); err == nil || err.Error() != errEncodingPKSDuplication.Error() {
+			t.Fatalf("expected error %q, got %q", errEncodingPKSDuplication, err)
+		}
+
+		// JSON: bad json
+		data, err := json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		data = replaceStringInBytes(data, "\"ciphersuite\"", "bad")
+		expectedErrorPrefix = errors.New("invalid character 'b' looking for beginning of object key string")
+
+		if err = json.Unmarshal(data, d); err == nil || !strings.HasPrefix(err.Error(), expectedErrorPrefix.Error()) {
+			t.Fatalf("expected error %q, got %q", expectedErrorPrefix, err)
+		}
+
+		// UnmarshallJSON: bad group
+		data, err = json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		data = replaceStringInBytes(data, fmt.Sprintf("\"group\":%d", registry.Ciphersuite), "\"group\":2")
+		if err = json.Unmarshal(data, d); err == nil || err.Error() != errInvalidGroup.Error() {
+			t.Fatalf("expected error %q, got %q", errInvalidGroup, err)
+		}
+
+		// UnmarshallJSON: bad ciphersuite
+		data, err = json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		data = replaceStringInBytes(data, fmt.Sprintf("\"ciphersuite\":%d", registry.Ciphersuite), "\"ciphersuite\":70")
+		if err = json.Unmarshal(data, d); err == nil || err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected error %q, got %q", errInvalidCiphersuite, err)
+		}
+
+		// UnmarshallJSON: bad ciphersuite
+		data, err = json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		data = replaceStringInBytes(data, fmt.Sprintf("\"ciphersuite\":%d", c.group), "\"ciphersuite\":17")
+		if err = json.Unmarshal(data, d); err == nil || err.Error() != errInvalidCiphersuite.Error() {
+			t.Fatalf("expected error %q, got %q", errInvalidCiphersuite, err)
+		}
+
+		// UnmarshallJSON: bad ciphersuite
+		data, err = json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		data = replaceStringInBytes(data, fmt.Sprintf("\"ciphersuite\":%d", c.group), "\"ciphersuite\":-1")
+		if err = json.Unmarshal(data, d); err == nil || err.Error() != errEncodingInvalidJSONEncoding.Error() {
+			t.Fatalf("expected error %q, got %q", errEncodingInvalidJSONEncoding, err)
+		}
+
+		// UnmarshallJSON: bad ciphersuite
+		data, err = json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		overflow := "9223372036854775808" // MaxInt64 + 1
+		data = replaceStringInBytes(data, fmt.Sprintf("\"ciphersuite\":%d", c.group), "\"ciphersuite\":"+overflow)
+
+		expectedErrorPrefix = errors.New(
+			"failed to read Group: strconv.Atoi: parsing \"9223372036854775808\": value out of range",
+		)
+
+		if err = json.Unmarshal(data, d); err == nil || !strings.HasPrefix(err.Error(), expectedErrorPrefix.Error()) {
+			t.Fatalf("expected error %q, got %q", expectedErrorPrefix, err)
+		}
+	})
+}
+
+func replaceStringInBytes(data []byte, old, new string) []byte {
+	s := string(data)
+	s = strings.Replace(s, old, new, 1)
+
+	return []byte(s)
+}
+
+func TestRegistry_JSON(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		_, _, _, _, registry := completeDKG(t, c)
+
+		// JSON
+		j, err := json.Marshal(registry)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		r2 := new(dkg.PublicKeyShareRegistry)
+		if err := json.Unmarshal(j, r2); err != nil {
+			t.Fatal(err)
+		}
+
+		if err = compareRegistries(registry, r2); err != nil {
+			t.Fatal(err)
 		}
 	})
 }
