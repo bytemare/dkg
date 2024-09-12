@@ -25,7 +25,7 @@ import (
 type KeyShare secretsharing.KeyShare
 
 // Identifier returns the identity for this share.
-func (k *KeyShare) Identifier() uint64 {
+func (k *KeyShare) Identifier() uint16 {
 	return (*secretsharing.KeyShare)(k).Identifier()
 }
 
@@ -97,20 +97,20 @@ func (p *PublicKeyShare) UnmarshalJSON(data []byte) error {
 // and public key verifications.
 type PublicKeyShareRegistry struct {
 	GroupPublicKey  *group.Element             `json:"groupPublicKey"`
-	PublicKeyShares map[uint64]*PublicKeyShare `json:"publicKeyShares"`
-	Total           uint                       `json:"total"`
-	Threshold       uint                       `json:"threshold"`
+	PublicKeyShares map[uint16]*PublicKeyShare `json:"publicKeyShares"`
+	Total           uint16                     `json:"total"`
+	Threshold       uint16                     `json:"threshold"`
 	Ciphersuite     Ciphersuite                `json:"ciphersuite"`
 }
 
 // NewPublicKeyShareRegistry returns a populated PublicKeyShareRegistry.
-func (c Ciphersuite) NewPublicKeyShareRegistry(threshold, total uint) *PublicKeyShareRegistry {
+func (c Ciphersuite) NewPublicKeyShareRegistry(threshold, total uint16) *PublicKeyShareRegistry {
 	return &PublicKeyShareRegistry{
 		Ciphersuite:     c,
 		Threshold:       threshold,
 		Total:           total,
 		GroupPublicKey:  nil,
-		PublicKeyShares: make(map[uint64]*PublicKeyShare, total),
+		PublicKeyShares: make(map[uint16]*PublicKeyShare, total),
 	}
 }
 
@@ -121,7 +121,7 @@ func (k *PublicKeyShareRegistry) Add(pks *PublicKeyShare) error {
 		return errPublicKeyShareRegistered
 	}
 
-	if uint(len(k.PublicKeyShares)) == k.Total {
+	if uint16(len(k.PublicKeyShares)) == k.Total {
 		return errPublicKeyShareCapacityExceeded
 	}
 
@@ -131,7 +131,7 @@ func (k *PublicKeyShareRegistry) Add(pks *PublicKeyShare) error {
 }
 
 // Get returns the registered public key for id, or nil.
-func (k *PublicKeyShareRegistry) Get(id uint64) *PublicKeyShare {
+func (k *PublicKeyShareRegistry) Get(id uint16) *PublicKeyShare {
 	for _, pks := range k.PublicKeyShares {
 		if pks != nil && pks.ID == id {
 			return pks
@@ -153,7 +153,7 @@ func (k *PublicKeyShareRegistry) Commitments() [][]*group.Element {
 }
 
 // VerifyPublicKey returns nil if the id / pubKey pair is registered, and an error otherwise.
-func (k *PublicKeyShareRegistry) VerifyPublicKey(id uint64, pubKey *group.Element) error {
+func (k *PublicKeyShareRegistry) VerifyPublicKey(id uint16, pubKey *group.Element) error {
 	for _, ks := range k.PublicKeyShares {
 		if ks.ID == id {
 			if pubKey == nil {
@@ -175,10 +175,10 @@ func (k *PublicKeyShareRegistry) VerifyPublicKey(id uint64, pubKey *group.Elemen
 	return fmt.Errorf("%w: %q", errVerifyUnknownID, id)
 }
 
-func registryByteSize(c Ciphersuite, threshold, total uint) (int, int) {
+func registryByteSize(c Ciphersuite, threshold, total uint16) (int, int) {
 	g := group.Group(c)
 	eLen := g.ElementLength()
-	pksLen := 1 + 8 + 4 + eLen + int(threshold)*eLen
+	pksLen := 1 + 2 + 4 + eLen + int(threshold)*eLen
 
 	return 1 + 2 + 2 + g.ElementLength() + int(total)*pksLen, pksLen
 }
@@ -188,8 +188,8 @@ func (k *PublicKeyShareRegistry) Encode() []byte {
 	size, _ := registryByteSize(k.Ciphersuite, k.Threshold, k.Total)
 	out := make([]byte, 5, size)
 	out[0] = byte(k.Ciphersuite)
-	binary.LittleEndian.PutUint16(out[1:3], uint16(k.Total))
-	binary.LittleEndian.PutUint16(out[3:5], uint16(k.Threshold))
+	binary.LittleEndian.PutUint16(out[1:3], k.Total)
+	binary.LittleEndian.PutUint16(out[3:5], k.Threshold)
 	out = append(out, k.GroupPublicKey.Encode()...)
 
 	for _, pks := range k.PublicKeyShares {
@@ -211,8 +211,8 @@ func (k *PublicKeyShareRegistry) Decode(data []byte) error {
 		return errInvalidCiphersuite
 	}
 
-	total := uint(binary.LittleEndian.Uint16(data[1:3]))
-	threshold := uint(binary.LittleEndian.Uint16(data[3:5]))
+	total := binary.LittleEndian.Uint16(data[1:3])
+	threshold := binary.LittleEndian.Uint16(data[3:5])
 	size, pksLen := registryByteSize(c, threshold, total)
 
 	if len(data) != size {
@@ -227,7 +227,7 @@ func (k *PublicKeyShareRegistry) Decode(data []byte) error {
 		return fmt.Errorf("invalid group public key encoding: %w", err)
 	}
 
-	pks := make(map[uint64]*PublicKeyShare, total)
+	pks := make(map[uint16]*PublicKeyShare, total)
 	offset := 5 + eLen
 
 	for i := range total {

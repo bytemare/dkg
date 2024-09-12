@@ -19,9 +19,9 @@ import (
 type Round1Data struct {
 	ProofOfKnowledge *Signature       `json:"proof"`
 	Commitment       []*group.Element `json:"com"`
-	SenderIdentifier uint64           `json:"senderId"`
+	SenderIdentifier uint16           `json:"senderId"`
 	Group            group.Group      `json:"group"`
-	threshold        uint
+	threshold        uint16
 }
 
 // NewRound1Data initializes a new round 1 data package. Use this to subsequently decode or unmarshal encoded data.
@@ -46,10 +46,10 @@ func (p *Participant) NewRound1Data() *Round1Data {
 
 // Encode returns a compact byte serialization of Round1Data.
 func (d *Round1Data) Encode() []byte {
-	size := 1 + 8 + d.Group.ElementLength() + d.Group.ScalarLength() + len(d.Commitment)*d.Group.ElementLength()
-	out := make([]byte, 9, size)
+	size := 1 + 2 + d.Group.ElementLength() + d.Group.ScalarLength() + len(d.Commitment)*d.Group.ElementLength()
+	out := make([]byte, 3, size)
 	out[0] = byte(d.Group)
-	binary.LittleEndian.PutUint64(out[1:9], d.SenderIdentifier)
+	binary.LittleEndian.PutUint16(out[1:3], d.SenderIdentifier)
 	out = append(out, d.ProofOfKnowledge.R.Encode()...)
 	out = append(out, d.ProofOfKnowledge.Z.Encode()...)
 
@@ -91,13 +91,13 @@ func (d *Round1Data) Decode(data []byte) error {
 
 	g := group.Group(c)
 
-	expectedSize := 1 + 8 + g.ElementLength() + g.ScalarLength() + int(d.threshold)*g.ElementLength()
+	expectedSize := 1 + 2 + g.ElementLength() + g.ScalarLength() + int(d.threshold)*g.ElementLength()
 	if len(data) != expectedSize {
 		return fmt.Errorf("%w: expected %d got %d", errDecodeInvalidLength, expectedSize, len(data))
 	}
 
-	id := binary.LittleEndian.Uint64(data[1:9])
-	offset := 9
+	id := binary.LittleEndian.Uint16(data[1:3])
+	offset := 3
 
 	r, offset, err := readElementFromBytes(g, data, offset)
 	if err != nil {
@@ -131,8 +131,8 @@ func (d *Round1Data) Decode(data []byte) error {
 // Round2Data is an output of the Continue() function, to be sent to the Receiver.
 type Round2Data struct {
 	SecretShare         *group.Scalar `json:"secretShare"`
-	SenderIdentifier    uint64        `json:"senderId"`
-	RecipientIdentifier uint64        `json:"recipientId"`
+	SenderIdentifier    uint16        `json:"senderId"`
+	RecipientIdentifier uint16        `json:"recipientId"`
 	Group               group.Group   `json:"group"`
 }
 
@@ -148,11 +148,11 @@ func (p *Participant) NewRound2Data() *Round2Data {
 
 // Encode returns a compact byte serialization of Round2Data.
 func (d *Round2Data) Encode() []byte {
-	size := 1 + 16 + d.Group.ScalarLength()
-	out := make([]byte, 17, size)
+	size := 1 + 4 + d.Group.ScalarLength()
+	out := make([]byte, 5, size)
 	out[0] = byte(d.Group)
-	binary.LittleEndian.PutUint64(out[1:9], d.SenderIdentifier)
-	binary.LittleEndian.PutUint64(out[9:17], d.RecipientIdentifier)
+	binary.LittleEndian.PutUint16(out[1:3], d.SenderIdentifier)
+	binary.LittleEndian.PutUint16(out[3:5], d.RecipientIdentifier)
 	out = append(out, d.SecretShare.Encode()...)
 
 	return out
@@ -171,15 +171,15 @@ func (d *Round2Data) Decode(data []byte) error {
 
 	g := group.Group(c)
 
-	expectedSize := 1 + 16 + g.ScalarLength()
+	expectedSize := 1 + 4 + g.ScalarLength()
 	if len(data) != expectedSize {
 		return fmt.Errorf("%w: expected %d got %d", errDecodeInvalidLength, expectedSize, len(data))
 	}
 
-	s := binary.LittleEndian.Uint64(data[1:9])
-	r := binary.LittleEndian.Uint64(data[9:17])
+	s := binary.LittleEndian.Uint16(data[1:3])
+	r := binary.LittleEndian.Uint16(data[3:5])
 
-	share, _, err := readScalarFromBytes(g, data, 17)
+	share, _, err := readScalarFromBytes(g, data, 5)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errDecodeSecretShare, err)
 	}

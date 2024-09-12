@@ -31,14 +31,14 @@ type testZKVector struct {
 	pk string
 	r  string
 	z  string
-	id uint64
+	id uint16
 }
 
 type testCase struct {
 	name            string
 	zk              testZKVector
-	threshold       uint
-	maxParticipants uint
+	threshold       uint16
+	maxParticipants uint16
 	ciphersuite     dkg.Ciphersuite
 	group           group.Group
 }

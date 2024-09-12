@@ -81,7 +81,7 @@ func TestSignature_Clear(t *testing.T) {
 		k := c.group.NewScalar().Random()
 		sk := c.group.NewScalar().Random()
 		pk := c.group.Base().Multiply(sk)
-		id := uint64(1)
+		id := uint16(1)
 		s, _ := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, k)
 		s.Clear()
 
