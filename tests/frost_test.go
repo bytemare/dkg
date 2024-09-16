@@ -45,7 +45,10 @@ func TestFrostGenerateZeroKnowledgeProof(t *testing.T) {
 		r := readHexElement(t, c.group, c.zk.r)
 		z := readHexScalar(t, c.group, c.zk.z)
 
-		s, _ := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, k)
+		s, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, k)
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		if s == nil {
 			t.Fatal()

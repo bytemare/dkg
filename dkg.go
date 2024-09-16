@@ -11,6 +11,7 @@
 package dkg
 
 import (
+	"errors"
 	"fmt"
 
 	group "github.com/bytemare/crypto"
@@ -63,7 +64,7 @@ func (c Ciphersuite) Group() group.Group {
 }
 
 func checkPolynomial(threshold uint16, p secretsharing.Polynomial) error {
-	if uint16(len(p)) != threshold {
+	if len(p) != int(threshold) {
 		return errPolynomialLength
 	}
 
@@ -73,6 +74,8 @@ func checkPolynomial(threshold uint16, p secretsharing.Polynomial) error {
 
 	return nil
 }
+
+var errIDOutOfRange = errors.New("identifier is above authorized range")
 
 // NewParticipant instantiates a new participant with identifier id. The identifier must be different from zero and
 // unique among the set of participants. The same participant instance must be used throughout the protocol execution,
@@ -93,7 +96,7 @@ func (c Ciphersuite) NewParticipant(
 	}
 
 	if id > maxSigners {
-		return nil, fmt.Errorf("identifier %d is above authorized range [1:%d]", id, maxSigners)
+		return nil, fmt.Errorf("%w [1:%d]: %d", errIDOutOfRange, maxSigners, id)
 	}
 
 	p := &Participant{
@@ -189,7 +192,7 @@ func (p *Participant) StartWithRandom(random *group.Scalar) *Round1Data {
 // for each peer.
 func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint16]*Round2Data, error) {
 	// We consider the case where the input does not contain the package from the participant.
-	if uint16(len(r1DataSet)) != p.maxSigners && uint16(len(r1DataSet)) != p.maxSigners-1 {
+	if len(r1DataSet) != int(p.maxSigners) && len(r1DataSet) != int(p.maxSigners-1) {
 		return nil, errRound1DataElements
 	}
 
@@ -283,11 +286,11 @@ func (p *Participant) verifyRound2Data(r1 []*Round1Data, r2 *Round2Data) (*group
 // Finalize ingests the broadcast data from round 1 and the round 2 data destined for the participant,
 // and returns the participant's secret share and verification key, and the group's public key.
 func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data) (*KeyShare, error) {
-	if uint16(len(r1DataSet)) != p.maxSigners && uint16(len(r1DataSet)) != p.maxSigners-1 {
+	if len(r1DataSet) != int(p.maxSigners) && len(r1DataSet) != int(p.maxSigners-1) {
 		return nil, errRound1DataElements
 	}
 
-	if uint16(len(r2DataSet)) != p.maxSigners-1 {
+	if len(r2DataSet) != int(p.maxSigners-1) {
 		return nil, errRound2DataElements
 	}
 

@@ -285,7 +285,7 @@ func TestCiphersuite_NewParticipant_Bad_ParticipantIDZero(t *testing.T) {
 func TestCiphersuite_NewParticipant_Bad_ParticipantIDTooHigh(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
 		id := c.maxParticipants + 1
-		errParticipantIDZero := fmt.Errorf("identifier %d is above authorized range [1:%d]", id, c.maxParticipants)
+		errParticipantIDZero := fmt.Errorf("identifier is above authorized range [1:%d]: %d", c.maxParticipants, id)
 		if _, err := c.ciphersuite.NewParticipant(id, c.threshold, c.maxParticipants); err == nil ||
 			err.Error() != errParticipantIDZero.Error() {
 			t.Fatalf("expected error on id == 0, want %q got %q", errParticipantIDZero, err)

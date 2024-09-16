@@ -121,7 +121,7 @@ func (k *PublicKeyShareRegistry) Add(pks *PublicKeyShare) error {
 		return errPublicKeyShareRegistered
 	}
 
-	if uint16(len(k.PublicKeyShares)) == k.Total {
+	if len(k.PublicKeyShares) == int(k.Total) {
 		return errPublicKeyShareCapacityExceeded
 	}
 

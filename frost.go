@@ -9,7 +9,6 @@
 package dkg
 
 import (
-	"encoding/binary"
 	"slices"
 
 	"filippo.io/edwards25519"
@@ -30,22 +29,18 @@ func (s *Signature) Clear() {
 	s.Z.Zero()
 }
 
-func lengthPrefixEncode(data []byte) []byte {
-	out := make([]byte, 2, 2+len(data))
-	binary.BigEndian.PutUint16(out, uint16(len(data)))
-
-	return append(out, data...)
-}
-
 func challenge(g group.Group, id uint16, pubkey, r *group.Element) *group.Scalar {
 	dst := []byte("dkg")
+	dstLen := []byte{byte(3)}
+	sLen := []byte{byte(g.ScalarLength())}  // fits on a single byte
+	eLen := []byte{byte(g.ElementLength())} // fits on a single byte
 
-	// hash (id || dst || φ0 || r), but with length prefixes
+	// hash (id || dst || φ0 || r), but with single-byte length prefixes
 	input := slices.Concat[[]byte](
-		lengthPrefixEncode(g.NewScalar().SetUInt64(uint64(id)).Encode()),
-		lengthPrefixEncode(dst),
-		lengthPrefixEncode(pubkey.Encode()),
-		lengthPrefixEncode(r.Encode()),
+		sLen, g.NewScalar().SetUInt64(uint64(id)).Encode(),
+		dstLen, dst,
+		eLen, pubkey.Encode(),
+		eLen, r.Encode(),
 	)
 
 	var sc *group.Scalar
