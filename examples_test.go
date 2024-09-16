@@ -20,8 +20,8 @@ import (
 // to build their secret key share.
 func Example_dkg() {
 	// Each participant must be set to use the same configuration. We use (3,5) here for the demo, on Ristretto255.
-	totalAmountOfParticipants := uint(5)
-	threshold := uint(3)
+	totalAmountOfParticipants := uint16(5)
+	threshold := uint16(3)
 	c := dkg.Ristretto255Sha512
 
 	var err error
@@ -29,8 +29,8 @@ func Example_dkg() {
 	// Step 0: Initialise your participant. Each participant must be given an identifier that MUST be unique among
 	// all participants. For this example, The participants will have the identifiers 1, 2, 3, 4, and 5.
 	participants := make([]*dkg.Participant, totalAmountOfParticipants)
-	for id := uint(1); id <= totalAmountOfParticipants; id++ {
-		participants[id-1], err = c.NewParticipant(uint64(id), totalAmountOfParticipants, threshold)
+	for id := uint16(1); id <= totalAmountOfParticipants; id++ {
+		participants[id-1], err = c.NewParticipant(id, threshold, totalAmountOfParticipants)
 		if err != nil {
 			panic(err)
 		}
@@ -59,7 +59,7 @@ func Example_dkg() {
 	// Step 2: Call Continue() on each participant providing them with the compiled decoded data. Each participant will
 	// return a map of Round2Data, one for each other participant, which must be sent to the specific peer
 	// (not broadcast).
-	accumulatedRound2Data := make([]map[uint64]*dkg.Round2Data, totalAmountOfParticipants)
+	accumulatedRound2Data := make([]map[uint16]*dkg.Round2Data, totalAmountOfParticipants)
 	for i, p := range participants {
 		if accumulatedRound2Data[i], err = p.Continue(decodedRound1Data); err != nil {
 			panic(err)
@@ -165,6 +165,6 @@ func Example_dkg() {
 		panic("failed to recover the correct group secret")
 	}
 
-	// Output: The encoded registry of public keys is 742 bytes long.
+	// Output: The encoded registry of public keys is 712 bytes long.
 	// Signing keys for participant set up and valid.
 }

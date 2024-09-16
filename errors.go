@@ -16,7 +16,7 @@ var (
 	errAbortInvalidSignature          = errors.New("ABORT - invalid signature")
 	errAbortInvalidSecretShare        = errors.New("ABORT - invalid secret share received from peer")
 	errInvalidCiphersuite             = errors.New("invalid ciphersuite")
-	errParticipantIDZero              = errors.New("participant ID has forbidden value 0")
+	errParticipantIDZero              = errors.New("identifier is 0")
 	errRound1DataElements             = errors.New("invalid number of expected round 1 data packets")
 	errRound2DataElements             = errors.New("invalid number of expected round 2 data packets")
 	errRound2InvalidReceiver          = errors.New("invalid receiver in round 2 package")

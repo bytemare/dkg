@@ -28,11 +28,11 @@ You can find the documentation and usage examples in [the package doc](https://p
 
 ## Usage
 
-### Assumptions
+### Requirements
 
-- All parties are identified with unique IDs.
+- All parties are identified with distinct ```uint16``` non-zero IDs.
 - Communicate over confidential, authenticated, and secure channels.
-- All participants honestly follow the protocol (they can, nevertheless, identify the misbehaving participant).
+- All participants honestly follow the protocol (they can, nevertheless, identify a misbehaving participant).
 
 ### Setup
 
@@ -47,21 +47,23 @@ problem that must be investigated. One may re-run the protocol after excluding t
 
 The following steps describe how to run the DKG among participants. Note that participants maintain a state between phases.
 For each participant:
-1. Run Init()
+1. Run ```Init()```
     - this returns a round 1 package
     - send/broadcast this package to every other participant
       (this might include the very same participant, in which case it will discard it)
 2. Collect all the round 1 packages from other participants
-3. Run Continue() with the collection of round 1 packages
+3. Run ```Continue()``` with the collection of round 1 packages
     - this returns round 2 packages, one destined to each other participant
     - each package specifies the intended receiver
     - send it to the intended receiver
 4. Collect all round 2 packages destined to the participant
-5. Run Finalize() with the collected round 1 and round 2 packages
+5. Run ```Finalize()``` with the collected round 1 and round 2 packages
     - returns the participant's own secret signing share,
       the corresponding verification/public share, and the group's public key
 6. Erase all intermediary values received and computed by the participants (including in their states)
 7. Optionally, compute the verification keys for each other participant and store them
+8. You might want each participant to already send their ```PublicKeyShare``` to a central coordinator or broadcast it 
+   to the other participants, as required to run the [FROST](https://github.com/bytemare/frost) protocol.
 
 ## Versioning
 

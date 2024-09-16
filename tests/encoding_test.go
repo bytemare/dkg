@@ -107,7 +107,7 @@ func testR1Encoding(t *testing.T, p *dkg.Participant, r *dkg.Round1Data) {
 	compareR1Data(t, r, jsonDec)
 }
 
-func testR2Encoding(t *testing.T, p *dkg.Participant, d map[uint64]*dkg.Round2Data) {
+func testR2Encoding(t *testing.T, p *dkg.Participant, d map[uint16]*dkg.Round2Data) {
 	for _, r := range d {
 		// Test byte encoding
 		bDec := p.NewRound2Data()
@@ -123,12 +123,12 @@ func testR2Encoding(t *testing.T, p *dkg.Participant, d map[uint64]*dkg.Round2Da
 
 func Test_Encoding(t *testing.T) {
 	c := dkg.Ristretto255Sha512
-	maxSigners := uint(3)
-	threshold := uint(2)
+	maxSigners := uint16(3)
+	threshold := uint16(2)
 
-	p1, _ := c.NewParticipant(1, maxSigners, threshold)
-	p2, _ := c.NewParticipant(2, maxSigners, threshold)
-	p3, _ := c.NewParticipant(3, maxSigners, threshold)
+	p1, _ := c.NewParticipant(1, threshold, maxSigners)
+	p2, _ := c.NewParticipant(2, threshold, maxSigners)
+	p3, _ := c.NewParticipant(3, threshold, maxSigners)
 
 	r1P1 := p1.Start()
 	r1P2 := p2.Start()
@@ -188,7 +188,7 @@ func Test_Encoding(t *testing.T) {
 
 func TestParticipant_NewRound1Data(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
-		p, _ := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold)
+		p, _ := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants)
 		d := p.NewRound1Data()
 
 		if d.Group != c.group {
@@ -207,7 +207,7 @@ func TestParticipant_NewRound1Data(t *testing.T) {
 			t.Fatal()
 		}
 
-		if uint(len(d.Commitment)) != c.threshold {
+		if uint16(len(d.Commitment)) != c.threshold {
 			t.Fatal()
 		}
 
@@ -221,7 +221,7 @@ func TestParticipant_NewRound1Data(t *testing.T) {
 
 func TestParticipant_NewRound2Data(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
-		p, _ := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold)
+		p, _ := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants)
 		d := p.NewRound2Data()
 
 		if d.Group != c.group {
@@ -247,7 +247,7 @@ func TestRound1_Decode_Fail(t *testing.T) {
 	errDecodeCommitment := errors.New("invalid encoding of commitment")
 
 	testAllCases(t, func(c *testCase) {
-		p, _ := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold)
+		p, _ := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants)
 		r1 := p.NewRound1Data()
 
 		// nil or len = 0
@@ -273,7 +273,7 @@ func TestRound1_Decode_Fail(t *testing.T) {
 		}
 
 		// invalid length: to low, too high
-		expectedSize := 1 + 8 + c.group.ElementLength() + c.group.ScalarLength() + int(
+		expectedSize := 1 + 2 + c.group.ElementLength() + c.group.ScalarLength() + int(
 			c.threshold,
 		)*c.group.ElementLength()
 		data := make([]byte, expectedSize+1)
@@ -290,9 +290,9 @@ func TestRound1_Decode_Fail(t *testing.T) {
 		}
 
 		// proof: bad r
-		data = make([]byte, 9, expectedSize)
+		data = make([]byte, 3, expectedSize)
 		data[0] = byte(c.group)
-		binary.LittleEndian.PutUint64(data[1:9], 1)
+		binary.LittleEndian.PutUint16(data[1:3], 1)
 		data = append(data, badElement(t, c.group)...)
 		data = append(data, badScalar(t, c.group)...)
 		data = append(data, make([]byte, expectedSize-len(data))...) // fill the tail
@@ -302,9 +302,9 @@ func TestRound1_Decode_Fail(t *testing.T) {
 		}
 
 		// proof: bad z
-		data = make([]byte, 9, expectedSize)
+		data = make([]byte, 3, expectedSize)
 		data[0] = byte(c.group)
-		binary.LittleEndian.PutUint64(data[1:9], 256)
+		binary.LittleEndian.PutUint16(data[1:3], 256)
 		data = append(data, c.group.Base().Encode()...)
 		data = append(data, badScalar(t, c.group)...)
 		data = append(data, make([]byte, expectedSize-len(data))...) // fill the tail
@@ -314,9 +314,9 @@ func TestRound1_Decode_Fail(t *testing.T) {
 		}
 
 		// commitment: some error in one of the elements
-		data = make([]byte, 9, expectedSize)
+		data = make([]byte, 3, expectedSize)
 		data[0] = byte(c.group)
-		binary.LittleEndian.PutUint64(data[1:9], 1)
+		binary.LittleEndian.PutUint16(data[1:3], 1)
 		data = append(data, c.group.Base().Encode()...)
 		data = append(data, c.group.NewScalar().Random().Encode()...)
 		for range c.threshold {
@@ -384,7 +384,7 @@ func TestRound2_Decode_Fail(t *testing.T) {
 	errDecodeSecretShare := errors.New("invalid encoding of secret share")
 
 	testAllCases(t, func(c *testCase) {
-		p, _ := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold)
+		p, _ := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants)
 		r2 := p.NewRound2Data()
 
 		// nil or len = 0
@@ -410,7 +410,7 @@ func TestRound2_Decode_Fail(t *testing.T) {
 		}
 
 		// invalid length: too short, too long
-		expectedSize := 1 + 16 + c.group.ScalarLength()
+		expectedSize := 1 + 4 + c.group.ScalarLength()
 		data := make([]byte, expectedSize+1)
 		data[0] = byte(c.ciphersuite)
 
@@ -425,10 +425,10 @@ func TestRound2_Decode_Fail(t *testing.T) {
 		}
 
 		// bad share encoding
-		data = make([]byte, 17, expectedSize)
+		data = make([]byte, 5, expectedSize)
 		data[0] = byte(c.group)
-		binary.LittleEndian.PutUint64(data[1:9], 1)
-		binary.LittleEndian.PutUint64(data[9:17], 2)
+		binary.LittleEndian.PutUint16(data[1:3], 1)
+		binary.LittleEndian.PutUint16(data[3:5], 2)
 		data = append(data, badScalar(t, c.group)...)
 
 		if err := r2.Decode(data); err == nil || !strings.HasPrefix(err.Error(), errDecodeSecretShare.Error()) {

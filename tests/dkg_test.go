@@ -47,7 +47,7 @@ func TestCompleteDKG(t *testing.T) {
 		}
 
 		// Step 4: Finalize and test outputs.
-		quals := []uint64{1, 3, 5}
+		quals := []uint16{1, 3, 5}
 		keyShares := make([]*dkg.KeyShare, 0, len(quals))
 		registry := c.ciphersuite.NewPublicKeyShareRegistry(c.threshold, c.maxParticipants)
 		pubKey, _ := dkg.GroupPublicKeyFromRound1(c.ciphersuite, r1)
@@ -105,8 +105,8 @@ func TestCompleteDKG(t *testing.T) {
 
 func (c *testCase) makeParticipants(t *testing.T) []*dkg.Participant {
 	ps := make([]*dkg.Participant, 0, c.maxParticipants)
-	for i := range uint64(c.maxParticipants) {
-		p, err := c.ciphersuite.NewParticipant(i+1, c.maxParticipants, c.threshold)
+	for i := range c.maxParticipants {
+		p, err := c.ciphersuite.NewParticipant(i+1, c.threshold, c.maxParticipants)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -126,8 +126,8 @@ func (c *testCase) runRound1(p []*dkg.Participant) []*dkg.Round1Data {
 	return r1
 }
 
-func (c *testCase) runRound2(t *testing.T, p []*dkg.Participant, r1 []*dkg.Round1Data) map[uint64][]*dkg.Round2Data {
-	r2 := make(map[uint64][]*dkg.Round2Data, c.maxParticipants)
+func (c *testCase) runRound2(t *testing.T, p []*dkg.Participant, r1 []*dkg.Round1Data) map[uint16][]*dkg.Round2Data {
+	r2 := make(map[uint16][]*dkg.Round2Data, c.maxParticipants)
 	for i := range c.maxParticipants {
 		r, err := p[i].Continue(r1)
 		if err != nil {
@@ -149,7 +149,7 @@ func (c *testCase) finalize(
 	t *testing.T,
 	participants []*dkg.Participant,
 	r1 []*dkg.Round1Data,
-	r2 map[uint64][]*dkg.Round2Data,
+	r2 map[uint16][]*dkg.Round2Data,
 ) []*dkg.KeyShare {
 	keyShares := make([]*dkg.KeyShare, 0, c.maxParticipants)
 	for _, participant := range participants {
@@ -184,7 +184,7 @@ func makeRegistry(t *testing.T, c *testCase, keyShares []*dkg.KeyShare) *dkg.Pub
 func completeDKG(
 	t *testing.T,
 	c *testCase,
-) ([]*dkg.Participant, []*dkg.Round1Data, map[uint64][]*dkg.Round2Data, []*dkg.KeyShare, *dkg.PublicKeyShareRegistry) {
+) ([]*dkg.Participant, []*dkg.Round1Data, map[uint16][]*dkg.Round2Data, []*dkg.KeyShare, *dkg.PublicKeyShareRegistry) {
 	p := c.makeParticipants(t)
 	r1 := c.runRound1(p)
 	r2 := c.runRound2(t, p, r1)
@@ -237,7 +237,7 @@ func TestCiphersuite_BadID(t *testing.T) {
 	}
 }
 
-func testMakePolynomial(g group.Group, n uint) secretsharing.Polynomial {
+func testMakePolynomial(g group.Group, n uint16) secretsharing.Polynomial {
 	p := secretsharing.NewPolynomial(n)
 	for i := range n {
 		p[i] = g.NewScalar().Random()
@@ -248,12 +248,12 @@ func testMakePolynomial(g group.Group, n uint) secretsharing.Polynomial {
 
 func TestCiphersuite_NewParticipant(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
-		if _, err := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold); err != nil {
+		if _, err := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants); err != nil {
 			t.Fatal(err)
 		}
 
 		poly := testMakePolynomial(c.group, c.threshold)
-		if _, err := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold, poly...); err != nil {
+		if _, err := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants, poly...); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -272,10 +272,21 @@ func TestCiphersuite_NewParticipant_Bad_Ciphersuite(t *testing.T) {
 }
 
 func TestCiphersuite_NewParticipant_Bad_ParticipantIDZero(t *testing.T) {
-	errParticipantIDZero := errors.New("participant ID has forbidden value 0")
+	errParticipantIDZero := errors.New("identifier is 0")
 
 	testAllCases(t, func(c *testCase) {
 		if _, err := c.ciphersuite.NewParticipant(0, c.threshold, c.maxParticipants); err == nil ||
+			err.Error() != errParticipantIDZero.Error() {
+			t.Fatalf("expected error on id == 0, want %q got %q", errParticipantIDZero, err)
+		}
+	})
+}
+
+func TestCiphersuite_NewParticipant_Bad_ParticipantIDTooHigh(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		id := c.maxParticipants + 1
+		errParticipantIDZero := fmt.Errorf("identifier is above authorized range [1:%d]: %d", c.maxParticipants, id)
+		if _, err := c.ciphersuite.NewParticipant(id, c.threshold, c.maxParticipants); err == nil ||
 			err.Error() != errParticipantIDZero.Error() {
 			t.Fatalf("expected error on id == 0, want %q got %q", errParticipantIDZero, err)
 		}
@@ -287,13 +298,13 @@ func TestCiphersuite_NewParticipant_Bad_PolynomialLength(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		poly := make([]*group.Scalar, c.threshold-1)
-		if _, err := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold, poly...); err == nil ||
+		if _, err := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants, poly...); err == nil ||
 			err.Error() != errPolynomialLength.Error() {
 			t.Fatalf("expected error %q, got %q", errPolynomialLength, err)
 		}
 
 		poly = make([]*group.Scalar, c.threshold+1)
-		if _, err := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold, poly...); err == nil ||
+		if _, err := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants, poly...); err == nil ||
 			err.Error() != errPolynomialLength.Error() {
 			t.Fatalf("expected error %q, got %q", errPolynomialLength, err)
 		}
@@ -305,14 +316,14 @@ func TestCiphersuite_NewParticipant_Bad_PolyHasNilCoeff(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		poly := make([]*group.Scalar, c.threshold)
-		if _, err := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold, poly...); err == nil ||
+		if _, err := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants, poly...); err == nil ||
 			err.Error() != errPolyHasNilCoeff.Error() {
 			t.Fatalf("expected error %q, got %q", errPolyHasNilCoeff, err)
 		}
 
 		poly = testMakePolynomial(c.group, c.threshold)
 		poly[1] = nil
-		if _, err := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold, poly...); err == nil ||
+		if _, err := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants, poly...); err == nil ||
 			err.Error() != errPolyHasNilCoeff.Error() {
 			t.Fatalf("expected error %q, got %q", errPolyHasNilCoeff, err)
 		}
@@ -325,7 +336,7 @@ func TestCiphersuite_NewParticipant_Bad_PolyHasZeroCoeff(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
 		poly := testMakePolynomial(c.group, c.threshold)
 		poly[1].Zero()
-		if _, err := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold, poly...); err == nil ||
+		if _, err := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants, poly...); err == nil ||
 			err.Error() != errPolyHasZeroCoeff.Error() {
 			t.Fatalf("expected error %q, got %q", errPolyHasZeroCoeff, err)
 		}
@@ -338,7 +349,7 @@ func TestCiphersuite_NewParticipant_Bad_PolyHasDuplicates(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
 		poly := testMakePolynomial(c.group, c.threshold)
 		poly[1].Set(poly[2])
-		if _, err := c.ciphersuite.NewParticipant(1, c.maxParticipants, c.threshold, poly...); err == nil ||
+		if _, err := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants, poly...); err == nil ||
 			err.Error() != errPolyHasDuplicates.Error() {
 			t.Fatalf("expected error %q, got %q", errPolyHasDuplicates, err)
 		}
@@ -490,11 +501,11 @@ func TestParticipant_Finalize_Bad_Round2DataElements(t *testing.T) {
 
 		// too long
 		for _, participant := range p {
-			r, err := p[(participant.Identifier+1)%uint64(c.maxParticipants)].Continue(r1)
+			r, err := p[(participant.Identifier+1)%c.maxParticipants].Continue(r1)
 			if err != nil {
 				t.Fatal(err)
 			}
-			d := append(r2[participant.Identifier], r[(participant.Identifier+1)%uint64(c.maxParticipants)])
+			d := append(r2[participant.Identifier], r[(participant.Identifier+1)%c.maxParticipants])
 			if _, err := participant.Finalize(r1, d); err == nil || err.Error() != errRound2DataElements.Error() {
 				t.Fatalf("expected error %q, got %q", errRound2DataElements, err)
 			}
@@ -828,7 +839,7 @@ func TestRegistry_Add_Bad(t *testing.T) {
 		}
 
 		// add a share though we're full
-		keyShares[0].ID = uint64(c.maxParticipants + 1)
+		keyShares[0].ID = c.maxParticipants + 1
 		if err := registry.Add(keyShares[0].Public()); err == nil ||
 			err.Error() != errPublicKeyShareCapacityExceeded.Error() {
 			t.Fatalf("expected error %q, got %q", errPublicKeyShareCapacityExceeded, err)
@@ -841,12 +852,12 @@ func TestRegistry_Get(t *testing.T) {
 		_, _, _, _, registry := completeDKG(t, c)
 
 		id := c.maxParticipants - 1
-		if registry.Get(uint64(id)) == nil {
+		if registry.Get(id) == nil {
 			t.Fatal("Get returned nil")
 		}
 
 		id = c.maxParticipants + 1
-		if registry.Get(uint64(id)) != nil {
+		if registry.Get(id) != nil {
 			t.Fatalf("Get returned non-nil: %d", id)
 		}
 	})
@@ -859,7 +870,7 @@ func TestRegistry_VerifyPublicKey(t *testing.T) {
 	errVerifyUnknownID := errors.New("the requested identifier is not registered")
 	testAllCases(t, func(c *testCase) {
 		_, _, _, _, registry := completeDKG(t, c)
-		id := uint64(1)
+		id := uint16(1)
 		pk := registry.PublicKeyShares[id].PublicKey
 
 		if err := registry.VerifyPublicKey(id, pk); err != nil {

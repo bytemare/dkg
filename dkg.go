@@ -11,6 +11,7 @@
 package dkg
 
 import (
+	"errors"
 	"fmt"
 
 	group "github.com/bytemare/crypto"
@@ -62,8 +63,8 @@ func (c Ciphersuite) Group() group.Group {
 	return group.Group(c)
 }
 
-func checkPolynomial(threshold uint, p secretsharing.Polynomial) error {
-	if uint(len(p)) != threshold {
+func checkPolynomial(threshold uint16, p secretsharing.Polynomial) error {
+	if len(p) != int(threshold) {
 		return errPolynomialLength
 	}
 
@@ -74,14 +75,16 @@ func checkPolynomial(threshold uint, p secretsharing.Polynomial) error {
 	return nil
 }
 
+var errIDOutOfRange = errors.New("identifier is above authorized range")
+
 // NewParticipant instantiates a new participant with identifier id. The identifier must be different from zero and
 // unique among the set of participants. The same participant instance must be used throughout the protocol execution,
 // to ensure the correct internal intermediary values are used. Optionally, the participant's secret polynomial can be
 // provided to set its secret and commitment (also enabling re-instantiating the same participant if the same polynomial
 // is used).
 func (c Ciphersuite) NewParticipant(
-	id uint64,
-	maxSigners, threshold uint,
+	id uint16,
+	threshold, maxSigners uint16,
 	polynomial ...*group.Scalar,
 ) (*Participant, error) {
 	if !c.Available() {
@@ -90,6 +93,10 @@ func (c Ciphersuite) NewParticipant(
 
 	if id == 0 {
 		return nil, errParticipantIDZero
+	}
+
+	if id > maxSigners {
+		return nil, fmt.Errorf("%w [1:%d]: %d", errIDOutOfRange, maxSigners, id)
 	}
 
 	p := &Participant{
@@ -120,12 +127,12 @@ type Participant struct {
 	*secrets
 	*config
 	commitment []*group.Element
-	Identifier uint64
+	Identifier uint16
 }
 
 type config struct {
-	maxSigners uint
-	threshold  uint
+	maxSigners uint16
+	threshold  uint16
 	group      group.Group
 }
 
@@ -157,7 +164,7 @@ func (p *Participant) initPoly(polynomial ...*group.Scalar) error {
 		}
 	}
 
-	p.secretShare = p.polynomial.Evaluate(p.group.NewScalar().SetUInt64(p.Identifier))
+	p.secretShare = p.polynomial.Evaluate(p.group.NewScalar().SetUInt64(uint64(p.Identifier)))
 
 	return nil
 }
@@ -183,13 +190,13 @@ func (p *Participant) StartWithRandom(random *group.Scalar) *Round1Data {
 
 // Continue ingests the broadcast data from other peers and returns a map of dedicated Round2Data structures
 // for each peer.
-func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint64]*Round2Data, error) {
+func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint16]*Round2Data, error) {
 	// We consider the case where the input does not contain the package from the participant.
-	if uint(len(r1DataSet)) != p.maxSigners && uint(len(r1DataSet)) != p.maxSigners-1 {
+	if len(r1DataSet) != int(p.maxSigners) && len(r1DataSet) != int(p.maxSigners-1) {
 		return nil, errRound1DataElements
 	}
 
-	r2data := make(map[uint64]*Round2Data, p.maxSigners-1)
+	r2data := make(map[uint16]*Round2Data, p.maxSigners-1)
 
 	for _, data := range r1DataSet {
 		if data == nil || data.SenderIdentifier == p.Identifier {
@@ -212,7 +219,7 @@ func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint64]*Round2Data,
 		}
 
 		// round 2, step 1
-		peerS := p.group.NewScalar().SetUInt64(peer)
+		peerS := p.group.NewScalar().SetUInt64(uint64(peer))
 		r2data[peer] = &Round2Data{
 			Group:               p.group,
 			SenderIdentifier:    p.Identifier,
@@ -226,7 +233,7 @@ func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint64]*Round2Data,
 	return r2data, nil
 }
 
-func getCommitment(r1DataSet []*Round1Data, id uint64) ([]*group.Element, error) {
+func getCommitment(r1DataSet []*Round1Data, id uint16) ([]*group.Element, error) {
 	for _, r1d := range r1DataSet {
 		if r1d.SenderIdentifier == id {
 			if len(r1d.Commitment) == 0 {
@@ -279,11 +286,11 @@ func (p *Participant) verifyRound2Data(r1 []*Round1Data, r2 *Round2Data) (*group
 // Finalize ingests the broadcast data from round 1 and the round 2 data destined for the participant,
 // and returns the participant's secret share and verification key, and the group's public key.
 func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data) (*KeyShare, error) {
-	if uint(len(r1DataSet)) != p.maxSigners && uint(len(r1DataSet)) != p.maxSigners-1 {
+	if len(r1DataSet) != int(p.maxSigners) && len(r1DataSet) != int(p.maxSigners-1) {
 		return nil, errRound1DataElements
 	}
 
-	if uint(len(r2DataSet)) != p.maxSigners-1 {
+	if len(r2DataSet) != int(p.maxSigners-1) {
 		return nil, errRound2DataElements
 	}
 
@@ -315,7 +322,7 @@ func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data)
 	}, nil
 }
 
-func (p *Participant) verifyCommitmentPublicKey(id uint64, share *group.Scalar, commitment []*group.Element) error {
+func (p *Participant) verifyCommitmentPublicKey(id uint16, share *group.Scalar, commitment []*group.Element) error {
 	pk := p.group.Base().Multiply(share)
 	if !secretsharing.Verify(p.group, p.Identifier, pk, commitment) {
 		return fmt.Errorf(
@@ -362,7 +369,7 @@ func GroupPublicKeyFromCommitments(c Ciphersuite, commitments [][]*group.Element
 }
 
 // ComputeParticipantPublicKey computes the verification share for participant id given the commitments of round 1.
-func ComputeParticipantPublicKey(c Ciphersuite, id uint64, commitments [][]*group.Element) (*group.Element, error) {
+func ComputeParticipantPublicKey(c Ciphersuite, id uint16, commitments [][]*group.Element) (*group.Element, error) {
 	if !c.Available() {
 		return nil, errInvalidCiphersuite
 	}
@@ -392,7 +399,7 @@ func ComputeParticipantPublicKey(c Ciphersuite, id uint64, commitments [][]*grou
 
 // VerifyPublicKey verifies if the pubKey associated to id is valid given the public commitments in the data from the
 // first round.
-func VerifyPublicKey(c Ciphersuite, id uint64, pubKey *group.Element, commitments [][]*group.Element) error {
+func VerifyPublicKey(c Ciphersuite, id uint16, pubKey *group.Element, commitments [][]*group.Element) error {
 	if !c.Available() {
 		return errInvalidCiphersuite
 	}

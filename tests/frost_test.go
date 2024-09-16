@@ -45,7 +45,10 @@ func TestFrostGenerateZeroKnowledgeProof(t *testing.T) {
 		r := readHexElement(t, c.group, c.zk.r)
 		z := readHexScalar(t, c.group, c.zk.z)
 
-		s, _ := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, k)
+		s, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, k)
+		if err != nil {
+			t.Fatal(err)
+		}
 
 		if s == nil {
 			t.Fatal()
@@ -81,7 +84,7 @@ func TestSignature_Clear(t *testing.T) {
 		k := c.group.NewScalar().Random()
 		sk := c.group.NewScalar().Random()
 		pk := c.group.Base().Multiply(sk)
-		id := uint64(1)
+		id := uint16(1)
 		s, _ := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, k)
 		s.Clear()
 
