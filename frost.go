@@ -9,6 +9,9 @@
 package dkg
 
 import (
+	"encoding/hex"
+	"errors"
+	"fmt"
 	"slices"
 
 	"filippo.io/edwards25519"
@@ -17,10 +20,84 @@ import (
 	"github.com/gtank/ristretto255"
 )
 
+var errSignatureDecodePrefix = errors.New("failed to decode Signature")
+
 // Signature represents a Schnorr signature.
 type Signature struct {
-	R *group.Element `json:"r"`
-	Z *group.Scalar  `json:"z"`
+	R     *group.Element `json:"r"`
+	Z     *group.Scalar  `json:"z"`
+	Group group.Group    `json:"group"`
+}
+
+// Encode serializes the signature into a byte string.
+func (s *Signature) Encode() []byte {
+	out := make([]byte, 1, 1+s.Group.ElementLength()+s.Group.ScalarLength())
+	out[0] = byte(s.Group)
+	out = append(out, s.R.Encode()...)
+	out = append(out, s.Z.Encode()...)
+
+	return out
+}
+
+// Decode deserializes the compact encoding obtained from Encode(), or returns an error.
+func (s *Signature) Decode(data []byte) error {
+	if len(data) <= 1 {
+		return fmt.Errorf("%w: %w", errSignatureDecodePrefix, errEncodingInvalidLength)
+	}
+
+	if !Ciphersuite(data[0]).Available() {
+		return fmt.Errorf("%w: %w", errSignatureDecodePrefix, errInvalidCiphersuite)
+	}
+
+	g := group.Group(data[0])
+	expectedLength := 1 + g.ElementLength() + g.ScalarLength()
+
+	if len(data) != expectedLength {
+		return fmt.Errorf("%w: %w", errSignatureDecodePrefix, errEncodingInvalidLength)
+	}
+
+	r := g.NewElement()
+	if err := r.Decode(data[1 : 1+g.ElementLength()]); err != nil {
+		return fmt.Errorf("%w: %w: %w", errSignatureDecodePrefix, errDecodeProofR, err)
+	}
+
+	z := g.NewScalar()
+	if err := z.Decode(data[1+g.ElementLength():]); err != nil {
+		return fmt.Errorf("%w: %w: %w", errSignatureDecodePrefix, errDecodeProofZ, err)
+	}
+
+	s.Group = g
+	s.R = r
+	s.Z = z
+
+	return nil
+}
+
+// Hex returns the hexadecimal representation of the byte encoding returned by Encode().
+func (s *Signature) Hex() string {
+	return hex.EncodeToString(s.Encode())
+}
+
+// DecodeHex sets s to the decoding of the hex encoded representation returned by Hex().
+func (s *Signature) DecodeHex(h string) error {
+	b, err := hex.DecodeString(h)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errSignatureDecodePrefix, err)
+	}
+
+	return s.Decode(b)
+}
+
+// UnmarshalJSON decodes data into k, or returns an error.
+func (s *Signature) UnmarshalJSON(data []byte) error {
+	shadow := new(signatureShadow)
+	if err := unmarshalJSON(data, shadow); err != nil {
+		return fmt.Errorf("%w: %w", errSignatureDecodePrefix, err)
+	}
+
+	*s = Signature(*shadow)
+
+	return nil
 }
 
 // Clear overwrites the original values with default ones.
@@ -80,8 +157,9 @@ func generateZKProof(g group.Group, id uint16,
 	mu := k.Add(secret.Copy().Multiply(ch))
 
 	return &Signature{
-		R: r,
-		Z: mu,
+		Group: g,
+		R:     r,
+		Z:     mu,
 	}
 }
 

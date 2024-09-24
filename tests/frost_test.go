@@ -69,8 +69,9 @@ func TestFrostVerifyZeroKnowledgeProof(t *testing.T) {
 		id := c.zk.id
 		pk := readHexElement(t, c.group, c.zk.pk)
 		s := &dkg.Signature{
-			R: readHexElement(t, c.group, c.zk.r),
-			Z: readHexScalar(t, c.group, c.zk.z),
+			Group: c.group,
+			R:     readHexElement(t, c.group, c.zk.r),
+			Z:     readHexScalar(t, c.group, c.zk.z),
 		}
 
 		if ok, _ := dkg.FrostVerifyZeroKnowledgeProof(c.ciphersuite, id, pk, s); !ok {
