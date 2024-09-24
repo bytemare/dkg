@@ -16,6 +16,7 @@ import (
 
 	group "github.com/bytemare/crypto"
 	secretsharing "github.com/bytemare/secret-sharing"
+	"github.com/bytemare/secret-sharing/keys"
 )
 
 // A Ciphersuite defines the elliptic curve group to use.
@@ -178,7 +179,6 @@ func (p *Participant) Start() *Round1Data {
 // proof.
 func (p *Participant) StartWithRandom(random *group.Scalar) *Round1Data {
 	package1 := &Round1Data{
-		threshold:        p.threshold,
 		Group:            p.group,
 		SenderIdentifier: p.Identifier,
 		Commitment:       p.commitment,
@@ -191,7 +191,7 @@ func (p *Participant) StartWithRandom(random *group.Scalar) *Round1Data {
 // Continue ingests the broadcast data from other peers and returns a map of dedicated Round2Data structures
 // for each peer.
 func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint16]*Round2Data, error) {
-	// We consider the case where the input does not contain the package from the participant.
+	// We accept the case where the input does not contain the package from the participant.
 	if len(r1DataSet) != int(p.maxSigners) && len(r1DataSet) != int(p.maxSigners-1) {
 		return nil, errRound1DataElements
 	}
@@ -203,7 +203,7 @@ func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint16]*Round2Data,
 			continue
 		}
 
-		if data.Commitment[0] == nil {
+		if len(data.Commitment) == 0 || data.Commitment[0] == nil {
 			return nil, errCommitmentNilElement
 		}
 
@@ -285,7 +285,7 @@ func (p *Participant) verifyRound2Data(r1 []*Round1Data, r2 *Round2Data) (*group
 
 // Finalize ingests the broadcast data from round 1 and the round 2 data destined for the participant,
 // and returns the participant's secret share and verification key, and the group's public key.
-func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data) (*KeyShare, error) {
+func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data) (*keys.KeyShare, error) {
 	if len(r1DataSet) != int(p.maxSigners) && len(r1DataSet) != int(p.maxSigners-1) {
 		return nil, errRound1DataElements
 	}
@@ -310,14 +310,14 @@ func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data)
 	secretKey.Add(p.secretShare)
 	p.secretShare.Zero()
 
-	return &KeyShare{
+	return &keys.KeyShare{
 		Secret:         secretKey,
 		GroupPublicKey: groupPublic.Add(p.commitment[0]),
-		PublicKeyShare: secretsharing.PublicKeyShare{
-			PublicKey:  p.group.Base().Multiply(secretKey),
-			Commitment: p.commitment,
-			ID:         p.Identifier,
-			Group:      p.group,
+		PublicKeyShare: keys.PublicKeyShare{
+			PublicKey:     p.group.Base().Multiply(secretKey),
+			VssCommitment: p.commitment,
+			ID:            p.Identifier,
+			Group:         p.group,
 		},
 	}, nil
 }
@@ -375,7 +375,7 @@ func ComputeParticipantPublicKey(c Ciphersuite, id uint16, commitments [][]*grou
 	}
 
 	if len(commitments) == 0 {
-		return nil, errMissingCommitments
+		return nil, errMissingCommitment
 	}
 
 	g := group.Group(c)
@@ -383,7 +383,7 @@ func ComputeParticipantPublicKey(c Ciphersuite, id uint16, commitments [][]*grou
 
 	for _, commitment := range commitments {
 		if len(commitment) == 0 {
-			return nil, errNoCommitment
+			return nil, errMissingCommitment
 		}
 
 		prime, err := secretsharing.PubKeyForCommitment(g, id, commitment)
@@ -397,8 +397,8 @@ func ComputeParticipantPublicKey(c Ciphersuite, id uint16, commitments [][]*grou
 	return pk, nil
 }
 
-// VerifyPublicKey verifies if the pubKey associated to id is valid given the public commitments in the data from the
-// first round.
+// VerifyPublicKey verifies if the pubKey associated to id is valid given the public VSS commitments of the other
+// participants.
 func VerifyPublicKey(c Ciphersuite, id uint16, pubKey *group.Element, commitments [][]*group.Element) error {
 	if !c.Available() {
 		return errInvalidCiphersuite
@@ -422,4 +422,15 @@ func VerifyPublicKey(c Ciphersuite, id uint16, pubKey *group.Element, commitment
 	}
 
 	return nil
+}
+
+// VSSCommitmentsFromRegistry returns all the commitments for the set of PublicKeyShares in the registry.
+func VSSCommitmentsFromRegistry(registry *keys.PublicKeyShareRegistry) [][]*group.Element {
+	c := make([][]*group.Element, 0, len(registry.PublicKeyShares))
+
+	for _, pks := range registry.PublicKeyShares {
+		c = append(c, pks.VssCommitment)
+	}
+
+	return c
 }

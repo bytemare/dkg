@@ -12,6 +12,7 @@ import (
 	"fmt"
 
 	secretsharing "github.com/bytemare/secret-sharing"
+	"github.com/bytemare/secret-sharing/keys"
 
 	"github.com/bytemare/dkg"
 )
@@ -44,13 +45,10 @@ func Example_dkg() {
 		accumulatedRound1DataBytes[i] = p.Start().Encode()
 	}
 
-	// Upon reception of the encoded set, decode each item using NewRound1Data().
-	// Each participant, on their end, first creates a receiver and then use that to decode.
-	// We use Participant 1 here for the demo.
-	p1 := participants[0]
+	// Upon reception of the encoded set, decode each item.
 	decodedRound1Data := make([]*dkg.Round1Data, totalAmountOfParticipants)
 	for i, data := range accumulatedRound1DataBytes {
-		decodedRound1Data[i] = p1.NewRound1Data()
+		decodedRound1Data[i] = new(dkg.Round1Data)
 		if err = decodedRound1Data[i].Decode(data); err != nil {
 			panic(err)
 		}
@@ -71,7 +69,7 @@ func Example_dkg() {
 	// Round2Data item), and then calls Finalize with the Round1 and their Round2 data. This will output the
 	// participant's key share, containing its secret, public key share, and the group's public key that can be used for
 	// signature verification.
-	keyShares := make([]*dkg.KeyShare, totalAmountOfParticipants)
+	keyShares := make([]*keys.KeyShare, totalAmountOfParticipants)
 	for i, p := range participants {
 		accumulatedRound2DataForParticipant := make([]*dkg.Round2Data, 0, totalAmountOfParticipants)
 		for _, r2Data := range accumulatedRound2Data {
@@ -88,7 +86,7 @@ func Example_dkg() {
 	// Optional: Each participant can extract their public info pks := keyShare.Public() and send it to others
 	// or a registry of participants. You can encode the registry for transmission or storage (in byte strings or JSON),
 	// and recover it.
-	PublicKeyShareRegistry := c.NewPublicKeyShareRegistry(threshold, totalAmountOfParticipants)
+	PublicKeyShareRegistry := keys.NewPublicKeyShareRegistry(c.Group(), threshold, totalAmountOfParticipants)
 	for _, ks := range keyShares {
 		// A participant extracts its public key share and sends it to the others or the coordinator.
 		pks := ks.Public()
@@ -101,10 +99,10 @@ func Example_dkg() {
 
 	// Given all the commitments (as found in the Round1 data packages or all PublicKeyShare from all participants),
 	// one can verify every public key of the setup.
-	commitments := PublicKeyShareRegistry.Commitments()
+	commitments := dkg.VSSCommitmentsFromRegistry(PublicKeyShareRegistry)
 	for _, pks := range PublicKeyShareRegistry.PublicKeyShares {
-		if !pks.Verify(commitments) {
-			panic("invalid participant public key share")
+		if err = dkg.VerifyPublicKey(c, pks.ID, pks.PublicKey, commitments); err != nil {
+			panic(err)
 		}
 	}
 
@@ -118,7 +116,7 @@ func Example_dkg() {
 	if err != nil {
 		panic(err)
 	}
-	groupPublicKey3, err := dkg.GroupPublicKeyFromCommitments(c, PublicKeyShareRegistry.Commitments())
+	groupPublicKey3, err := dkg.GroupPublicKeyFromCommitments(c, dkg.VSSCommitmentsFromRegistry(PublicKeyShareRegistry))
 	if err != nil {
 		panic(err)
 	}
@@ -136,7 +134,7 @@ func Example_dkg() {
 	// Optional: This is how a participant can verify any participants public key of the protocol, given all the commitments.
 	// This can be done with the Commitments in the Round1 data set or in the collection of public key shares.
 	publicKeyShare := keyShares[2].Public()
-	if err = dkg.VerifyPublicKey(c, publicKeyShare.ID, publicKeyShare.PublicKey, PublicKeyShareRegistry.Commitments()); err != nil {
+	if err = dkg.VerifyPublicKey(c, publicKeyShare.ID, publicKeyShare.PublicKey, dkg.VSSCommitmentsFromRegistry(PublicKeyShareRegistry)); err != nil {
 		panic(err)
 	}
 
@@ -147,15 +145,15 @@ func Example_dkg() {
 	// one participant, so the keys are equivalent. In a true setup, you don't want to extract and gather participants'
 	// private keys, as it defeats the purpose of a DKG and might expose them.
 	g := c.Group()
-	keys := make(
-		[]secretsharing.Share,
+	shares := make(
+		[]keys.Share,
 		threshold,
 	) // Here you would add the secret keys from the other participants.
 	for i, k := range keyShares[:threshold] {
-		keys[i] = k
+		shares[i] = k
 	}
 
-	recombinedSecret, err := secretsharing.CombineShares(g, keys)
+	recombinedSecret, err := secretsharing.CombineShares(shares)
 	if err != nil {
 		panic("failed to reconstruct secret")
 	}

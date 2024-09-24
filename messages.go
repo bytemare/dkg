@@ -10,46 +10,35 @@ package dkg
 
 import (
 	"encoding/binary"
+	"encoding/hex"
+	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 
 	group "github.com/bytemare/crypto"
+)
+
+var (
+	errRound1DecodePrefix = errors.New("failed to decode Round 1 data")
+	errRound2DecodePrefix = errors.New("failed to decode Round 2 data")
 )
 
 // Round1Data is the output data of the Start() function, to be broadcast to all participants.
 type Round1Data struct {
 	ProofOfKnowledge *Signature       `json:"proof"`
-	Commitment       []*group.Element `json:"com"`
+	Commitment       []*group.Element `json:"commitment"`
 	SenderIdentifier uint16           `json:"senderId"`
 	Group            group.Group      `json:"group"`
-	threshold        uint16
-}
-
-// NewRound1Data initializes a new round 1 data package. Use this to subsequently decode or unmarshal encoded data.
-func (p *Participant) NewRound1Data() *Round1Data {
-	d := &Round1Data{
-		Group: p.group,
-		ProofOfKnowledge: &Signature{
-			R: p.group.NewElement(),
-			Z: p.group.NewScalar(),
-		},
-		Commitment:       make([]*group.Element, p.threshold),
-		SenderIdentifier: 0,
-		threshold:        p.threshold,
-	}
-
-	for i := range p.threshold {
-		d.Commitment[i] = p.group.NewElement()
-	}
-
-	return d
 }
 
 // Encode returns a compact byte serialization of Round1Data.
 func (d *Round1Data) Encode() []byte {
-	size := 1 + 2 + d.Group.ElementLength() + d.Group.ScalarLength() + len(d.Commitment)*d.Group.ElementLength()
-	out := make([]byte, 3, size)
+	size := 1 + 2 + 2 + d.Group.ElementLength() + d.Group.ScalarLength() + len(d.Commitment)*d.Group.ElementLength()
+	out := make([]byte, 5, size)
 	out[0] = byte(d.Group)
 	binary.LittleEndian.PutUint16(out[1:3], d.SenderIdentifier)
+	binary.LittleEndian.PutUint16(out[3:5], uint16(len(d.Commitment)))
 	out = append(out, d.ProofOfKnowledge.R.Encode()...)
 	out = append(out, d.ProofOfKnowledge.Z.Encode()...)
 
@@ -58,6 +47,11 @@ func (d *Round1Data) Encode() []byte {
 	}
 
 	return out
+}
+
+// Hex returns the hexadecimal representation of the byte encoding returned by Encode().
+func (d *Round1Data) Hex() string {
+	return hex.EncodeToString(d.Encode())
 }
 
 func readScalarFromBytes(g group.Group, data []byte, offset int) (*group.Scalar, int, error) {
@@ -80,50 +74,85 @@ func readElementFromBytes(g group.Group, data []byte, offset int) (*group.Elemen
 
 // Decode deserializes a valid byte encoding of Round1Data.
 func (d *Round1Data) Decode(data []byte) error {
-	if len(data) == 0 {
-		return errDecodeNoMessage
+	if len(data) <= 5 {
+		return fmt.Errorf("%w: %w", errRound1DecodePrefix, errEncodingInvalidLength)
 	}
 
 	c := Ciphersuite(data[0])
-	if !c.Available() || c != Ciphersuite(d.Group) {
-		return errInvalidCiphersuite
-	}
-
-	g := group.Group(c)
-
-	expectedSize := 1 + 2 + g.ElementLength() + g.ScalarLength() + int(d.threshold)*g.ElementLength()
-	if len(data) != expectedSize {
-		return fmt.Errorf("%w: expected %d got %d", errDecodeInvalidLength, expectedSize, len(data))
+	if !c.Available() {
+		return fmt.Errorf("%w: %w", errRound1DecodePrefix, errInvalidCiphersuite)
 	}
 
 	id := binary.LittleEndian.Uint16(data[1:3])
-	offset := 3
+	comLen := int(binary.LittleEndian.Uint16(data[3:5]))
+	g := group.Group(c)
+
+	expectedSize := 1 + 2 + 2 + g.ElementLength() + g.ScalarLength() + comLen*g.ElementLength()
+	if len(data) != expectedSize {
+		return fmt.Errorf(
+			"%w: %w: expected %d got %d",
+			errRound1DecodePrefix,
+			errDecodeInvalidLength,
+			expectedSize,
+			len(data),
+		)
+	}
+
+	offset := 5
 
 	r, offset, err := readElementFromBytes(g, data, offset)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errDecodeProofR, err)
+		return fmt.Errorf("%w: %w: %w", errRound1DecodePrefix, errDecodeProofR, err)
 	}
 
 	z, offset, err := readScalarFromBytes(g, data, offset)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errDecodeProofZ, err)
+		return fmt.Errorf("%w: %w: %w", errRound1DecodePrefix, errDecodeProofZ, err)
 	}
 
-	com := make([]*group.Element, d.threshold)
-	for i := range d.threshold {
+	com := make([]*group.Element, comLen)
+	for i := range comLen {
 		com[i], offset, err = readElementFromBytes(g, data, offset)
 		if err != nil {
-			return fmt.Errorf("%w: %w", errDecodeCommitment, err)
+			return fmt.Errorf("%w: %w: %w", errRound1DecodePrefix, errDecodeCommitment, err)
 		}
 	}
 
 	d.Group = g
 	d.SenderIdentifier = id
 	d.ProofOfKnowledge = &Signature{
-		R: r,
-		Z: z,
+		Group: g,
+		R:     r,
+		Z:     z,
 	}
 	d.Commitment = com
+
+	return nil
+}
+
+// DecodeHex sets k to the decoding of the hex encoded representation returned by Hex().
+func (d *Round1Data) DecodeHex(h string) error {
+	b, err := hex.DecodeString(h)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errRound1DecodePrefix, err)
+	}
+
+	return d.Decode(b)
+}
+
+// UnmarshalJSON reads the input data as JSON and deserializes it into the receiver. It doesn't modify the receiver when
+// encountering an error.
+func (d *Round1Data) UnmarshalJSON(data []byte) error {
+	r := new(r1DataShadow)
+	if err := unmarshalJSON(data, r); err != nil {
+		return fmt.Errorf("%w: %w", errRound1DecodePrefix, err)
+	}
+
+	if len(r.Commitment) == 0 {
+		return fmt.Errorf("%w: missing commitment", errRound1DecodePrefix)
+	}
+
+	*d = Round1Data(*r)
 
 	return nil
 }
@@ -134,16 +163,6 @@ type Round2Data struct {
 	SenderIdentifier    uint16        `json:"senderId"`
 	RecipientIdentifier uint16        `json:"recipientId"`
 	Group               group.Group   `json:"group"`
-}
-
-// NewRound2Data initializes a new round 2 data package. Use this to subsequently decode or unmarshal encoded data.
-func (p *Participant) NewRound2Data() *Round2Data {
-	return &Round2Data{
-		Group:               p.group,
-		SecretShare:         p.group.NewScalar(),
-		SenderIdentifier:    0,
-		RecipientIdentifier: 0,
-	}
 }
 
 // Encode returns a compact byte serialization of Round2Data.
@@ -158,22 +177,33 @@ func (d *Round2Data) Encode() []byte {
 	return out
 }
 
+// Hex returns the hexadecimal representation of the byte encoding returned by Encode().
+func (d *Round2Data) Hex() string {
+	return hex.EncodeToString(d.Encode())
+}
+
 // Decode deserializes a valid byte encoding of Round2Data.
 func (d *Round2Data) Decode(data []byte) error {
-	if len(data) == 0 {
-		return errDecodeNoMessage
+	if len(data) <= 5 {
+		return fmt.Errorf("%w: %w", errRound2DecodePrefix, errEncodingInvalidLength)
 	}
 
 	c := Ciphersuite(data[0])
-	if !c.Available() || c != Ciphersuite(d.Group) {
-		return errInvalidCiphersuite
+	if !c.Available() {
+		return fmt.Errorf("%w: %w", errRound2DecodePrefix, errInvalidCiphersuite)
 	}
 
 	g := group.Group(c)
 
-	expectedSize := 1 + 4 + g.ScalarLength()
+	expectedSize := 1 + 2 + 2 + g.ScalarLength()
 	if len(data) != expectedSize {
-		return fmt.Errorf("%w: expected %d got %d", errDecodeInvalidLength, expectedSize, len(data))
+		return fmt.Errorf(
+			"%w: %w: expected %d got %d",
+			errRound2DecodePrefix,
+			errDecodeInvalidLength,
+			expectedSize,
+			len(data),
+		)
 	}
 
 	s := binary.LittleEndian.Uint16(data[1:3])
@@ -181,7 +211,7 @@ func (d *Round2Data) Decode(data []byte) error {
 
 	share, _, err := readScalarFromBytes(g, data, 5)
 	if err != nil {
-		return fmt.Errorf("%w: %w", errDecodeSecretShare, err)
+		return fmt.Errorf("%w: %w: %w", errRound2DecodePrefix, errDecodeSecretShare, err)
 	}
 
 	d.Group = g
@@ -190,4 +220,63 @@ func (d *Round2Data) Decode(data []byte) error {
 	d.RecipientIdentifier = r
 
 	return nil
+}
+
+// DecodeHex sets k to the decoding of the hex encoded representation returned by Hex().
+func (d *Round2Data) DecodeHex(h string) error {
+	b, err := hex.DecodeString(h)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errRound2DecodePrefix, err)
+	}
+
+	return d.Decode(b)
+}
+
+// UnmarshalJSON reads the input data as JSON and deserializes it into the receiver. It doesn't modify the receiver when
+// encountering an error.
+func (d *Round2Data) UnmarshalJSON(data []byte) error {
+	r := new(r2DataShadow)
+	if err := unmarshalJSON(data, r); err != nil {
+		return fmt.Errorf("%w: %w", errRound2DecodePrefix, err)
+	}
+
+	*d = Round2Data(*r)
+
+	return nil
+}
+
+func jsonReGetField(key, s, catch string) (string, error) {
+	r := fmt.Sprintf(`%q:%s`, key, catch)
+	re := regexp.MustCompile(r)
+	matches := re.FindStringSubmatch(s)
+
+	if len(matches) != 2 {
+		return "", errEncodingInvalidJSONEncoding
+	}
+
+	return matches[1], nil
+}
+
+// jsonReGetGroup attempts to find the Ciphersuite JSON encoding in s.
+func jsonReGetGroup(s string) (Ciphersuite, error) {
+	f, err := jsonReGetField("group", s, `(\w+)`)
+	if err != nil {
+		return 0, err
+	}
+
+	i, err := strconv.Atoi(f)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read Group: %w", err)
+	}
+
+	if i < 0 || i > 63 {
+		return 0, errInvalidCiphersuite
+	}
+
+	c := Ciphersuite(i)
+	if !c.Available() {
+		return 0, errInvalidCiphersuite
+	}
+
+	return c, nil
 }

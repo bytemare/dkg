@@ -162,6 +162,9 @@ linters-settings:
     simplify: true
   goimports:
     local-prefixes: github.com/bytemare/dkg
+  gosec:
+    excludes:
+      - G115
   gosimple:
     checks: [ "all" ]
   govet:

@@ -17,6 +17,7 @@ import (
 
 	group "github.com/bytemare/crypto"
 	secretsharing "github.com/bytemare/secret-sharing"
+	"github.com/bytemare/secret-sharing/keys"
 
 	"github.com/bytemare/dkg"
 )
@@ -48,8 +49,8 @@ func TestCompleteDKG(t *testing.T) {
 
 		// Step 4: Finalize and test outputs.
 		quals := []uint16{1, 3, 5}
-		keyShares := make([]*dkg.KeyShare, 0, len(quals))
-		registry := c.ciphersuite.NewPublicKeyShareRegistry(c.threshold, c.maxParticipants)
+		keyShares := make([]*keys.KeyShare, 0, len(quals))
+		registry := keys.NewPublicKeyShareRegistry(c.group, c.threshold, c.maxParticipants)
 		pubKey, _ := dkg.GroupPublicKeyFromRound1(c.ciphersuite, r1)
 		for _, participant := range p {
 			keyShare, err := participant.Finalize(r1, r2[participant.Identifier])
@@ -76,7 +77,7 @@ func TestCompleteDKG(t *testing.T) {
 		}
 
 		{
-			commitments := registry.Commitments()
+			commitments := dkg.VSSCommitmentsFromRegistry(registry)
 			for _, k := range keyShares {
 				if err := dkg.VerifyPublicKey(c.ciphersuite, k.Identifier(), k.PublicKey, commitments); err != nil {
 					t.Fatal(err)
@@ -86,11 +87,11 @@ func TestCompleteDKG(t *testing.T) {
 
 		// Verify the threshold scheme by combining a subset of the shares.
 		{
-			combinedKeyShares := make([]secretsharing.Share, 0, len(quals))
+			combinedKeyShares := make([]keys.Share, 0, len(quals))
 			for _, k := range keyShares {
 				combinedKeyShares = append(combinedKeyShares, k)
 			}
-			secret, err := secretsharing.CombineShares(c.group, combinedKeyShares)
+			secret, err := secretsharing.CombineShares(combinedKeyShares)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -150,8 +151,8 @@ func (c *testCase) finalize(
 	participants []*dkg.Participant,
 	r1 []*dkg.Round1Data,
 	r2 map[uint16][]*dkg.Round2Data,
-) []*dkg.KeyShare {
-	keyShares := make([]*dkg.KeyShare, 0, c.maxParticipants)
+) []*keys.KeyShare {
+	keyShares := make([]*keys.KeyShare, 0, c.maxParticipants)
 	for _, participant := range participants {
 		ks, err := participant.Finalize(r1, r2[participant.Identifier])
 		if err != nil {
@@ -164,8 +165,8 @@ func (c *testCase) finalize(
 	return keyShares
 }
 
-func makeRegistry(t *testing.T, c *testCase, keyShares []*dkg.KeyShare) *dkg.PublicKeyShareRegistry {
-	registry := c.ciphersuite.NewPublicKeyShareRegistry(c.threshold, c.maxParticipants)
+func makeRegistry(t *testing.T, c *testCase, keyShares []*keys.KeyShare) *keys.PublicKeyShareRegistry {
+	registry := keys.NewPublicKeyShareRegistry(c.group, c.threshold, c.maxParticipants)
 	for _, keyShare := range keyShares {
 		if err := registry.Add(keyShare.Public()); err != nil {
 			t.Fatal(err)
@@ -173,7 +174,10 @@ func makeRegistry(t *testing.T, c *testCase, keyShares []*dkg.KeyShare) *dkg.Pub
 	}
 
 	var err error
-	registry.GroupPublicKey, err = dkg.GroupPublicKeyFromCommitments(c.ciphersuite, registry.Commitments())
+	registry.GroupPublicKey, err = dkg.GroupPublicKeyFromCommitments(
+		c.ciphersuite,
+		dkg.VSSCommitmentsFromRegistry(registry),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +188,7 @@ func makeRegistry(t *testing.T, c *testCase, keyShares []*dkg.KeyShare) *dkg.Pub
 func completeDKG(
 	t *testing.T,
 	c *testCase,
-) ([]*dkg.Participant, []*dkg.Round1Data, map[uint16][]*dkg.Round2Data, []*dkg.KeyShare, *dkg.PublicKeyShareRegistry) {
+) ([]*dkg.Participant, []*dkg.Round1Data, map[uint16][]*dkg.Round2Data, []*keys.KeyShare, *keys.PublicKeyShareRegistry) {
 	p := c.makeParticipants(t)
 	r1 := c.runRound1(p)
 	r2 := c.runRound2(t, p, r1)
@@ -677,7 +681,7 @@ func TestVerifyPublicKey_Bad_VerificationShareFailed(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
 		// id and pubkey not related
 		_, _, _, keyshares, registry := completeDKG(t, c)
-		commitments := registry.Commitments()
+		commitments := dkg.VSSCommitmentsFromRegistry(registry)
 
 		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[2].PublicKey, commitments); err == nil ||
 			!strings.HasPrefix(err.Error(), errVerificationShareFailed.Error()) {
@@ -700,7 +704,7 @@ func TestVerifyPublicKey_Bad_VerificationShareFailed(t *testing.T) {
 }
 
 func TestVerifyPublicKey_Bad_MissingCommitments(t *testing.T) {
-	errMissingRound1Data := errors.New("missing commitments")
+	errMissingRound1Data := errors.New("missing commitment")
 
 	testAllCases(t, func(c *testCase) {
 		_, _, _, keyshares, _ := completeDKG(t, c)
@@ -713,11 +717,11 @@ func TestVerifyPublicKey_Bad_MissingCommitments(t *testing.T) {
 }
 
 func TestVerifyPublicKey_Bad_NoCommitment(t *testing.T) {
-	errNoCommitment := errors.New("empty commitment")
+	errNoCommitment := errors.New("missing commitment")
 
 	testAllCases(t, func(c *testCase) {
 		_, _, _, keyshares, registry := completeDKG(t, c)
-		commitments := registry.Commitments()
+		commitments := dkg.VSSCommitmentsFromRegistry(registry)
 
 		commitments[3] = nil
 		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[1].PublicKey, commitments); err == nil ||
@@ -732,7 +736,7 @@ func TestVerifyPublicKey_Bad_CommitmentNilElement(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		_, _, _, keyshares, registry := completeDKG(t, c)
-		commitments := registry.Commitments()
+		commitments := dkg.VSSCommitmentsFromRegistry(registry)
 
 		commitments[2][2] = nil
 		if err := dkg.VerifyPublicKey(c.ciphersuite, keyshares[1].ID, keyshares[1].PublicKey, commitments); err == nil ||
@@ -755,7 +759,7 @@ func TestComputeParticipantPublicKey_Bad_InvalidCiphersuite(t *testing.T) {
 }
 
 func TestComputeParticipantPublicKey_Bad_MissingRound1Data(t *testing.T) {
-	errMissingRound1Data := errors.New("missing commitments")
+	errMissingRound1Data := errors.New("missing commitment")
 
 	testAllCases(t, func(c *testCase) {
 		// nil r1 data
@@ -767,11 +771,11 @@ func TestComputeParticipantPublicKey_Bad_MissingRound1Data(t *testing.T) {
 }
 
 func TestComputeParticipantPublicKey_Bad_NoCommitment(t *testing.T) {
-	errNoCommitment := errors.New("empty commitment")
+	errNoCommitment := errors.New("missing commitment")
 
 	testAllCases(t, func(c *testCase) {
 		_, _, _, _, registry := completeDKG(t, c)
-		commitments := registry.Commitments()
+		commitments := dkg.VSSCommitmentsFromRegistry(registry)
 
 		// missing commitment
 		commitments[3] = nil
@@ -787,7 +791,7 @@ func TestComputeParticipantPublicKey_Bad_CommitmentNilElement(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		_, _, _, _, registry := completeDKG(t, c)
-		commitments := registry.Commitments()
+		commitments := dkg.VSSCommitmentsFromRegistry(registry)
 
 		// commitment with nil element
 		commitments[4][2] = nil
@@ -816,85 +820,4 @@ func TestGroupPublicKey_BadCipher(t *testing.T) {
 		err.Error() != errInvalidCiphersuite.Error() {
 		t.Fatalf("expected %q, got %q", errInvalidCiphersuite, err)
 	}
-}
-
-func TestRegistry_Add_Bad(t *testing.T) {
-	errPublicKeyShareRegistered := errors.New("the public key share is already registered")
-	errPublicKeyShareCapacityExceeded := errors.New("can't add another public key share (full capacity)")
-
-	testAllCases(t, func(c *testCase) {
-		_, _, _, keyShares, _ := completeDKG(t, c)
-
-		registry := c.ciphersuite.NewPublicKeyShareRegistry(c.threshold, c.maxParticipants)
-		for _, keyShare := range keyShares {
-			if err := registry.Add(keyShare.Public()); err != nil {
-				t.Fatal(err)
-			}
-		}
-
-		// add a public key share that has already been added
-		if err := registry.Add(keyShares[0].Public()); err == nil ||
-			err.Error() != errPublicKeyShareRegistered.Error() {
-			t.Fatalf("expected error %q, got %q", errPublicKeyShareRegistered, err)
-		}
-
-		// add a share though we're full
-		keyShares[0].ID = c.maxParticipants + 1
-		if err := registry.Add(keyShares[0].Public()); err == nil ||
-			err.Error() != errPublicKeyShareCapacityExceeded.Error() {
-			t.Fatalf("expected error %q, got %q", errPublicKeyShareCapacityExceeded, err)
-		}
-	})
-}
-
-func TestRegistry_Get(t *testing.T) {
-	testAllCases(t, func(c *testCase) {
-		_, _, _, _, registry := completeDKG(t, c)
-
-		id := c.maxParticipants - 1
-		if registry.Get(id) == nil {
-			t.Fatal("Get returned nil")
-		}
-
-		id = c.maxParticipants + 1
-		if registry.Get(id) != nil {
-			t.Fatalf("Get returned non-nil: %d", id)
-		}
-	})
-}
-
-func TestRegistry_VerifyPublicKey(t *testing.T) {
-	errNilPubKey := errors.New("the provided public key is nil")
-	errRegistryHasNilPublicKey := errors.New("encountered a nil public key in registry")
-	errVerifyBadPubKey := errors.New("the public key differs from the one registered")
-	errVerifyUnknownID := errors.New("the requested identifier is not registered")
-	testAllCases(t, func(c *testCase) {
-		_, _, _, _, registry := completeDKG(t, c)
-		id := uint16(1)
-		pk := registry.PublicKeyShares[id].PublicKey
-
-		if err := registry.VerifyPublicKey(id, pk); err != nil {
-			t.Fatalf("unexpected error %q", err)
-		}
-
-		if err := registry.VerifyPublicKey(id, nil); err == nil || err.Error() != errNilPubKey.Error() {
-			t.Fatalf("expecter error %q, got %q", errNilPubKey, err)
-		}
-
-		expected := fmt.Errorf("%w for ID %d", errVerifyBadPubKey, id)
-		if err := registry.VerifyPublicKey(id, c.group.NewElement()); err == nil || err.Error() != expected.Error() {
-			t.Fatalf("expecter error %q, got %q", expected, err)
-		}
-
-		registry.PublicKeyShares[1].PublicKey = nil
-		expected = fmt.Errorf("%w for ID %d", errRegistryHasNilPublicKey, id)
-		if err := registry.VerifyPublicKey(id, c.group.NewElement()); err == nil || err.Error() != expected.Error() {
-			t.Fatalf("expecter error %q, got %q", expected, err)
-		}
-
-		expected = fmt.Errorf("%w: %q", errVerifyUnknownID, 0)
-		if err := registry.VerifyPublicKey(0, c.group.NewElement()); err == nil || err.Error() != expected.Error() {
-			t.Fatalf("expecter error %q, got %q", expected, err)
-		}
-	})
 }
