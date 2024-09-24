@@ -12,7 +12,6 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/big"
 	"slices"
@@ -70,40 +69,6 @@ func TestBadElement(t *testing.T) {
 			t.Error("expected error")
 		}
 	})
-}
-
-func testDecodingBytesNilEmpty(decoder serde, expectedError string) error {
-	// nil input
-	if err := decoder.Decode(nil); err == nil || err.Error() != expectedError {
-		return fmt.Errorf("expected error %q, got %q", expectedError, err)
-	}
-
-	// empty input
-	if err := decoder.Decode([]byte{}); err == nil || err.Error() != expectedError {
-		return fmt.Errorf("expected error %q, got %q", expectedError, err)
-	}
-
-	return nil
-}
-
-func testDecodeBytesBadCiphersuite(decoder serde, headerLength int, expectedError string) error {
-	input := make([]byte, headerLength)
-	input[0] = 2
-
-	if err := decoder.Decode(input); err == nil || err.Error() != expectedError {
-		return fmt.Errorf("expected error %q, got %q", expectedError, err)
-	}
-
-	return nil
-}
-
-func testDecodeHexOddLength(encoder, decoder serde, expectedError string) error {
-	h := encoder.Hex()
-	if err := decoder.DecodeHex(h[:len(h)-1]); err == nil || err.Error() != expectedError {
-		return fmt.Errorf("expected error %q, got %q", expectedError, err)
-	}
-
-	return nil
 }
 
 func TestRound1_Decode_Fail(t *testing.T) {
@@ -190,7 +155,7 @@ func TestRound1_Decode_Fail(t *testing.T) {
 		// JSON
 		errDecodeJSON := "failed to decode Round 1 data: failed to decode Signature: invalid JSON encoding"
 
-		if err := jsonTester(t, "failed to decode Round 1 data", errDecodeJSON, c.group, r1, decoded,
+		if err := jsonTester("failed to decode Round 1 data", errDecodeJSON, r1, decoded,
 			jsonTesterBaddie{
 				fmt.Sprintf("\"r\":\"%s\"", r1.ProofOfKnowledge.R.Hex()),
 				fmt.Sprintf("\"r\":\"%s\"", hex.EncodeToString(badElement(t, c.group))),
@@ -286,7 +251,7 @@ func TestRound2_Decode_Fail(t *testing.T) {
 		// JSON
 		errDecodeJSON := "failed to decode Round 2 data: invalid JSON encoding"
 
-		if err := jsonTester(t, "failed to decode Round 2 data", errDecodeJSON, c.group, r2, decoded,
+		if err := jsonTester("failed to decode Round 2 data", errDecodeJSON, r2, decoded,
 			jsonTesterBaddie{
 				fmt.Sprintf("\"secretShare\":\"%s\"", r2.SecretShare.Hex()),
 				fmt.Sprintf("\"secretShare\":\"%s\"", hex.EncodeToString(badScalar(t, c.group))),
@@ -354,15 +319,14 @@ func TestSignature_Decode_Fail(t *testing.T) {
 		}
 
 		// Hex: bad hex
-		h := signature.Hex()
-		if err := decoded.DecodeHex(h[:len(h)-1]); err == nil || err.Error() != errDecodeHex {
-			t.Fatalf("expected error %q, got %q", errDecodeHex, err)
+		if err := testDecodeHexOddLength(signature, decoded, errDecodeHex); err != nil {
+			t.Fatal(err)
 		}
 
 		// JSON
 		errDecodeJSON := "failed to decode Signature: invalid JSON encoding"
 
-		if err := jsonTester(t, "failed to decode Signature", errDecodeJSON, c.group, signature, decoded,
+		if err := jsonTester("failed to decode Signature", errDecodeJSON, signature, decoded,
 			jsonTesterBaddie{
 				fmt.Sprintf("\"r\":\"%s\"", signature.R.Hex()),
 				fmt.Sprintf("\"r\":\"%s\"", hex.EncodeToString(bad)),
@@ -373,108 +337,123 @@ func TestSignature_Decode_Fail(t *testing.T) {
 	})
 }
 
+func testDecodingBytesNilEmpty(decoder serde, expectedError string) error {
+	// nil input
+	if err := decoder.Decode(nil); err == nil || err.Error() != expectedError {
+		return fmt.Errorf("expected error %q, got %q", expectedError, err)
+	}
+
+	// empty input
+	if err := decoder.Decode([]byte{}); err == nil || err.Error() != expectedError {
+		return fmt.Errorf("expected error %q, got %q", expectedError, err)
+	}
+
+	return nil
+}
+
+func testDecodeBytesBadCiphersuite(decoder serde, headerLength int, expectedError string) error {
+	input := make([]byte, headerLength)
+	input[0] = 2
+
+	if err := decoder.Decode(input); err == nil || err.Error() != expectedError {
+		return fmt.Errorf("expected error %q, got %q", expectedError, err)
+	}
+
+	return nil
+}
+
+func testDecodeHexOddLength(encoder, decoder serde, expectedError string) error {
+	h := encoder.Hex()
+	if err := decoder.DecodeHex(h[:len(h)-1]); err == nil || err.Error() != expectedError {
+		return fmt.Errorf("expected error %q, got %q", expectedError, err)
+	}
+
+	return nil
+}
+
 type jsonTesterBaddie struct {
 	key, value, expectedError string
 }
 
-func jsonTester(
-	t *testing.T,
-	errPrefix, badJSONErr string,
-	g group.Group,
-	in any,
-	decoded json.Unmarshaler,
-	baddies ...jsonTesterBaddie,
-) error {
-	errInvalidCiphersuite := errPrefix + ": invalid ciphersuite"
-
-	// JSON: bad json
+func testJSONBaddie(in any, decoded json.Unmarshaler, baddie jsonTesterBaddie) error {
 	data, err := json.Marshal(in)
 	if err != nil {
 		return err
 	}
 
-	data = replaceStringInBytes(data, "\"group\"", "bad")
-	expectedErrorPrefix := errors.New("invalid character 'b' looking for beginning of object key string")
+	data = replaceStringInBytes(data, baddie.key, baddie.value)
 
 	if err = json.Unmarshal(data, decoded); err == nil ||
-		!strings.HasPrefix(err.Error(), expectedErrorPrefix.Error()) {
-		return fmt.Errorf("expected error %q, got %q", expectedErrorPrefix, err)
+		!strings.HasPrefix(err.Error(), baddie.expectedError) {
+		return fmt.Errorf("expected error %q, got %q", baddie.expectedError, err)
+	}
+
+	return nil
+}
+
+func jsonTester(errPrefix, badJSONErr string, in any, decoded json.Unmarshaler, baddies ...jsonTesterBaddie) error {
+	errInvalidCiphersuite := errPrefix + ": invalid ciphersuite"
+
+	// JSON: bad json
+	baddie := jsonTesterBaddie{
+		key:           "\"group\"",
+		value:         "bad",
+		expectedError: "invalid character 'b' looking for beginning of object key string",
+	}
+
+	if err := testJSONBaddie(in, decoded, baddie); err != nil {
+		return err
 	}
 
 	// UnmarshallJSON: bad group
-	data, err = json.Marshal(in)
-	if err != nil {
-		t.Fatal(err)
+	baddie = jsonTesterBaddie{
+		key:           "\"group\"",
+		value:         "\"group\":2, \"oldGroup\"",
+		expectedError: errInvalidCiphersuite,
 	}
 
-	data = replaceStringInBytes(data, fmt.Sprintf("\"group\":%d", g), "\"group\":2")
-	if err = json.Unmarshal(data, decoded); err == nil || err.Error() != errInvalidCiphersuite {
-		return fmt.Errorf("expected error %q, got %q", errInvalidCiphersuite, err)
-	}
-
-	// UnmarshallJSON: bad ciphersuite
-	data, err = json.Marshal(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	data = replaceStringInBytes(data, fmt.Sprintf("\"group\":%d", g), "\"group\":70")
-	if err = json.Unmarshal(data, decoded); err == nil || err.Error() != errInvalidCiphersuite {
-		return fmt.Errorf("expected error %q, got %q", errInvalidCiphersuite, err)
+	if err := testJSONBaddie(in, decoded, baddie); err != nil {
+		return err
 	}
 
 	// UnmarshallJSON: bad ciphersuite
-	data, err = json.Marshal(in)
-	if err != nil {
-		t.Fatal(err)
+	baddie = jsonTesterBaddie{
+		key:           "\"group\"",
+		value:         "\"group\":70, \"oldGroup\"",
+		expectedError: errInvalidCiphersuite,
 	}
 
-	data = replaceStringInBytes(data, fmt.Sprintf("\"group\":%d", g), "\"group\":17")
-	if err = json.Unmarshal(data, decoded); err == nil || err.Error() != errInvalidCiphersuite {
-		return fmt.Errorf("expected error %q, got %q", errInvalidCiphersuite, err)
-	}
-
-	// UnmarshallJSON: bad ciphersuite
-	data, err = json.Marshal(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	data = replaceStringInBytes(data, fmt.Sprintf("\"group\":%d", g), "\"group\":-1")
-	if err = json.Unmarshal(data, decoded); err == nil || err.Error() != badJSONErr {
-		return fmt.Errorf("expected error %q, got %q", badJSONErr, err)
+	if err := testJSONBaddie(in, decoded, baddie); err != nil {
+		return err
 	}
 
 	// UnmarshallJSON: bad ciphersuite
-	data, err = json.Marshal(in)
-	if err != nil {
-		t.Fatal(err)
+	baddie = jsonTesterBaddie{
+		key:           "\"group\"",
+		value:         "\"group\":-1, \"oldGroup\"",
+		expectedError: badJSONErr,
 	}
 
+	if err := testJSONBaddie(in, decoded, baddie); err != nil {
+		return err
+	}
+
+	// UnmarshallJSON: bad ciphersuite
 	overflow := "9223372036854775808" // MaxInt64 + 1
-	data = replaceStringInBytes(data, fmt.Sprintf("\"group\":%d", g), "\"group\":"+overflow)
+	baddie = jsonTesterBaddie{
+		key:           "\"group\"",
+		value:         "\"group\":" + overflow + ", \"oldGroup\"",
+		expectedError: errPrefix + ": failed to read Group: strconv.Atoi: parsing \"9223372036854775808\": value out of range",
+	}
 
-	expectedErrorPrefix = errors.New(
-		errPrefix + ": failed to read Group: strconv.Atoi: parsing \"9223372036854775808\": value out of range",
-	)
-
-	if err = json.Unmarshal(data, decoded); err == nil ||
-		!strings.HasPrefix(err.Error(), expectedErrorPrefix.Error()) {
-		return fmt.Errorf("expected error %q, got %q", expectedErrorPrefix, err)
+	if err := testJSONBaddie(in, decoded, baddie); err != nil {
+		return err
 	}
 
 	// Replace keys and values
-	for _, bad := range baddies {
-		data, err = json.Marshal(in)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		data = replaceStringInBytes(data, bad.key, bad.value)
-
-		if err = json.Unmarshal(data, decoded); err == nil ||
-			!strings.HasPrefix(err.Error(), bad.expectedError) {
-			return fmt.Errorf("expected error %q, got %q", bad.expectedError, err)
+	for _, baddie = range baddies {
+		if err := testJSONBaddie(in, decoded, baddie); err != nil {
+			return err
 		}
 	}
 
