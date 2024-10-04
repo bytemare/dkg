@@ -16,7 +16,7 @@ import (
 	"regexp"
 	"strconv"
 
-	group "github.com/bytemare/crypto"
+	"github.com/bytemare/ecc"
 )
 
 var (
@@ -26,10 +26,10 @@ var (
 
 // Round1Data is the output data of the Start() function, to be broadcast to all participants.
 type Round1Data struct {
-	ProofOfKnowledge *Signature       `json:"proof"`
-	Commitment       []*group.Element `json:"commitment"`
-	SenderIdentifier uint16           `json:"senderId"`
-	Group            group.Group      `json:"group"`
+	ProofOfKnowledge *Signature     `json:"proof"`
+	Commitment       []*ecc.Element `json:"commitment"`
+	SenderIdentifier uint16         `json:"senderId"`
+	Group            ecc.Group      `json:"group"`
 }
 
 // Encode returns a compact byte serialization of Round1Data.
@@ -54,7 +54,7 @@ func (d *Round1Data) Hex() string {
 	return hex.EncodeToString(d.Encode())
 }
 
-func readScalarFromBytes(g group.Group, data []byte, offset int) (*group.Scalar, int, error) {
+func readScalarFromBytes(g ecc.Group, data []byte, offset int) (*ecc.Scalar, int, error) {
 	s := g.NewScalar()
 	if err := s.Decode(data[offset : offset+g.ScalarLength()]); err != nil {
 		return nil, offset, fmt.Errorf("%w", err)
@@ -63,7 +63,7 @@ func readScalarFromBytes(g group.Group, data []byte, offset int) (*group.Scalar,
 	return s, offset + g.ScalarLength(), nil
 }
 
-func readElementFromBytes(g group.Group, data []byte, offset int) (*group.Element, int, error) {
+func readElementFromBytes(g ecc.Group, data []byte, offset int) (*ecc.Element, int, error) {
 	e := g.NewElement()
 	if err := e.Decode(data[offset : offset+g.ElementLength()]); err != nil {
 		return nil, offset, fmt.Errorf("%w", err)
@@ -85,7 +85,7 @@ func (d *Round1Data) Decode(data []byte) error {
 
 	id := binary.LittleEndian.Uint16(data[1:3])
 	comLen := int(binary.LittleEndian.Uint16(data[3:5]))
-	g := group.Group(c)
+	g := ecc.Group(c)
 
 	expectedSize := 1 + 2 + 2 + g.ElementLength() + g.ScalarLength() + comLen*g.ElementLength()
 	if len(data) != expectedSize {
@@ -110,7 +110,7 @@ func (d *Round1Data) Decode(data []byte) error {
 		return fmt.Errorf("%w: %w: %w", errRound1DecodePrefix, errDecodeProofZ, err)
 	}
 
-	com := make([]*group.Element, comLen)
+	com := make([]*ecc.Element, comLen)
 	for i := range comLen {
 		com[i], offset, err = readElementFromBytes(g, data, offset)
 		if err != nil {
@@ -159,10 +159,10 @@ func (d *Round1Data) UnmarshalJSON(data []byte) error {
 
 // Round2Data is an output of the Continue() function, to be sent to the Receiver.
 type Round2Data struct {
-	SecretShare         *group.Scalar `json:"secretShare"`
-	SenderIdentifier    uint16        `json:"senderId"`
-	RecipientIdentifier uint16        `json:"recipientId"`
-	Group               group.Group   `json:"group"`
+	SecretShare         *ecc.Scalar `json:"secretShare"`
+	SenderIdentifier    uint16      `json:"senderId"`
+	RecipientIdentifier uint16      `json:"recipientId"`
+	Group               ecc.Group   `json:"group"`
 }
 
 // Encode returns a compact byte serialization of Round2Data.
@@ -193,7 +193,7 @@ func (d *Round2Data) Decode(data []byte) error {
 		return fmt.Errorf("%w: %w", errRound2DecodePrefix, errInvalidCiphersuite)
 	}
 
-	g := group.Group(c)
+	g := ecc.Group(c)
 
 	expectedSize := 1 + 2 + 2 + g.ScalarLength()
 	if len(data) != expectedSize {

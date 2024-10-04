@@ -15,25 +15,25 @@ import (
 	"regexp"
 	"strings"
 
-	group "github.com/bytemare/crypto"
+	"github.com/bytemare/ecc"
 )
 
 var errInvalidPolynomialLength = errors.New("invalid polynomial length (exceeds uint16 limit 65535)")
 
 type shadowInit interface {
-	init(g group.Group, threshold uint16)
+	init(g ecc.Group, threshold uint16)
 }
 
 type r1DataShadow Round1Data
 
-func (r *r1DataShadow) init(g group.Group, threshold uint16) {
+func (r *r1DataShadow) init(g ecc.Group, threshold uint16) {
 	r.Group = g
 	r.ProofOfKnowledge = &Signature{
 		Group: g,
 		R:     g.NewElement(),
 		Z:     g.NewScalar(),
 	}
-	r.Commitment = make([]*group.Element, threshold)
+	r.Commitment = make([]*ecc.Element, threshold)
 
 	for i := range threshold {
 		r.Commitment[i] = g.NewElement()
@@ -42,14 +42,14 @@ func (r *r1DataShadow) init(g group.Group, threshold uint16) {
 
 type r2DataShadow Round2Data
 
-func (r *r2DataShadow) init(g group.Group, _ uint16) {
+func (r *r2DataShadow) init(g ecc.Group, _ uint16) {
 	r.Group = g
 	r.SecretShare = g.NewScalar()
 }
 
 type signatureShadow Signature
 
-func (s *signatureShadow) init(g group.Group, _ uint16) {
+func (s *signatureShadow) init(g ecc.Group, _ uint16) {
 	s.Group = g
 	s.R = g.NewElement()
 	s.Z = g.NewScalar()
@@ -95,7 +95,7 @@ func unmarshalJSON(data []byte, target shadowInit) error {
 		return err
 	}
 
-	target.init(group.Group(c), nPoly)
+	target.init(ecc.Group(c), nPoly)
 
 	if err = json.Unmarshal(data, target); err != nil {
 		return fmt.Errorf("%w", err)

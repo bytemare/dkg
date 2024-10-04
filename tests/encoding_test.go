@@ -114,11 +114,11 @@ func compareSignatures(a, b serde) error {
 		return fmt.Errorf("Expected equality on Group:\n\t%v\n\t%v\n", s1.Group, s2.Group)
 	}
 
-	if s1.R.Equal(s2.R) != 1 {
+	if !s1.R.Equal(s2.R) {
 		return fmt.Errorf("Expected equality on R:\n\t%s\n\t%s\n", s1.R.Hex(), s2.R.Hex())
 	}
 
-	if s1.Z.Equal(s2.Z) != 1 {
+	if !s1.Z.Equal(s2.Z) {
 		return fmt.Errorf("Expected equality on Z:\n\t%s\n\t%s\n", s1.Z.Hex(), s2.Z.Hex())
 	}
 
@@ -136,11 +136,11 @@ func compareR1Data(a, b serde) error {
 		return errors.New("expected same id")
 	}
 
-	if d1.ProofOfKnowledge.R.Equal(d2.ProofOfKnowledge.R) != 1 {
+	if !d1.ProofOfKnowledge.R.Equal(d2.ProofOfKnowledge.R) {
 		return errors.New("expected same r proof")
 	}
 
-	if d1.ProofOfKnowledge.Z.Equal(d2.ProofOfKnowledge.Z) != 1 {
+	if !d1.ProofOfKnowledge.Z.Equal(d2.ProofOfKnowledge.Z) {
 		return errors.New("expected same z proof")
 	}
 
@@ -149,7 +149,7 @@ func compareR1Data(a, b serde) error {
 	}
 
 	for i, d := range d1.Commitment {
-		if d.Equal(d2.Commitment[i]) != 1 {
+		if !d.Equal(d2.Commitment[i]) {
 			return errors.New("expected same commitment")
 		}
 	}
@@ -172,7 +172,7 @@ func compareR2Data(a, b serde) error {
 		return errors.New("expected same receiver id")
 	}
 
-	if d1.SecretShare.Equal(d2.SecretShare) != 1 {
+	if !d1.SecretShare.Equal(d2.SecretShare) {
 		return errors.New("expected same secret share")
 	}
 
