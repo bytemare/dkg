@@ -13,63 +13,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"slices"
 	"strings"
 	"testing"
 
-	group "github.com/bytemare/crypto"
+	"github.com/bytemare/ecc"
+	"github.com/bytemare/ecc/debug"
 
 	"github.com/bytemare/dkg"
 )
-
-func badScalar(t *testing.T, g group.Group) []byte {
-	order, ok := new(big.Int).SetString(g.Order(), 0)
-	if !ok {
-		t.Errorf("setting int in base %d failed: %v", 0, g.Order())
-	}
-
-	encoded := make([]byte, g.ScalarLength())
-	order.FillBytes(encoded)
-
-	if g == group.Ristretto255Sha512 || g == group.Edwards25519Sha512 {
-		slices.Reverse(encoded)
-	}
-
-	return encoded
-}
-
-func badElement(t *testing.T, g group.Group) []byte {
-	order, ok := new(big.Int).SetString(g.Order(), 0)
-	if !ok {
-		t.Errorf("setting int in base %d failed: %v", 0, g.Order())
-	}
-
-	encoded := make([]byte, g.ElementLength())
-	order.FillBytes(encoded)
-
-	if g == group.Ristretto255Sha512 || g == group.Edwards25519Sha512 {
-		slices.Reverse(encoded)
-	}
-
-	return encoded
-}
-
-func TestBadScalar(t *testing.T) {
-	testAllCases(t, func(c *testCase) {
-		if err := c.group.NewScalar().Decode(badScalar(t, c.group)); err == nil {
-			t.Fatal("expected error")
-		}
-	})
-}
-
-func TestBadElement(t *testing.T) {
-	testAllCases(t, func(c *testCase) {
-		if err := c.group.NewElement().Decode(badElement(t, c.group)); err == nil {
-			t.Error("expected error")
-		}
-	})
-}
 
 func TestRound1_Decode_Fail(t *testing.T) {
 	errDecodeInvalidLength := "failed to decode Round 1 data: invalid encoding length"
@@ -114,7 +66,7 @@ func TestRound1_Decode_Fail(t *testing.T) {
 
 		// proof: bad r
 		data = r1.Encode()
-		bad := slices.Replace(data, 5, 5+c.group.ElementLength(), badElement(t, c.group)...)
+		bad := slices.Replace(data, 5, 5+c.group.ElementLength(), debug.BadElementOffCurve(c.group)...)
 
 		if err := decoded.Decode(bad); err == nil || !strings.HasPrefix(err.Error(), errDecodeProofR) {
 			t.Fatalf("expected error %q, got %q", errDecodeProofR, err)
@@ -126,7 +78,7 @@ func TestRound1_Decode_Fail(t *testing.T) {
 			data,
 			5+c.group.ElementLength(),
 			5+c.group.ElementLength()+c.group.ScalarLength(),
-			badScalar(t, c.group)...)
+			debug.BadScalarHigh(c.group)...)
 
 		if err := decoded.Decode(bad); err == nil || !strings.HasPrefix(err.Error(), errDecodeProofZ) {
 			t.Fatalf("expected error %q, got %q", errDecodeProofZ, err)
@@ -140,7 +92,7 @@ func TestRound1_Decode_Fail(t *testing.T) {
 		data = append(data, c.group.Base().Encode()...)
 		data = append(data, c.group.NewScalar().Random().Encode()...)
 		for range c.threshold {
-			data = append(data, badElement(t, c.group)...)
+			data = append(data, debug.BadElementOffCurve(c.group)...)
 		}
 
 		if err := decoded.Decode(data); err == nil || !strings.HasPrefix(err.Error(), errDecodeCommitment) {
@@ -158,7 +110,7 @@ func TestRound1_Decode_Fail(t *testing.T) {
 		if err := jsonTester("failed to decode Round 1 data", errDecodeJSON, r1, decoded,
 			jsonTesterBaddie{
 				fmt.Sprintf("\"r\":\"%s\"", r1.ProofOfKnowledge.R.Hex()),
-				fmt.Sprintf("\"r\":\"%s\"", hex.EncodeToString(badElement(t, c.group))),
+				fmt.Sprintf("\"r\":\"%s\"", hex.EncodeToString(debug.BadElementOffCurve(c.group))),
 				"failed to decode Round 1 data: failed to decode Signature: element DecodeHex: ",
 			},
 			jsonTesterBaddie{
@@ -171,7 +123,7 @@ func TestRound1_Decode_Fail(t *testing.T) {
 		}
 
 		// UnmarshallJSON: excessive commitment length
-		r1.Commitment = make([]*group.Element, 65536)
+		r1.Commitment = make([]*ecc.Element, 65536)
 		for i := range 65536 {
 			r1.Commitment[i] = c.group.NewElement()
 		}
@@ -229,7 +181,7 @@ func TestRound2_Decode_Fail(t *testing.T) {
 		data[0] = byte(c.group)
 		binary.LittleEndian.PutUint16(data[1:3], 1)
 		binary.LittleEndian.PutUint16(data[3:5], 2)
-		data = append(data, badScalar(t, c.group)...)
+		data = append(data, debug.BadScalarHigh(c.group)...)
 
 		if err := decoded.Decode(data); err == nil || !strings.HasPrefix(err.Error(), errDecodeSecretShare) {
 			t.Fatalf("expected error %q, got %q", errDecodeSecretShare, err)
@@ -254,7 +206,7 @@ func TestRound2_Decode_Fail(t *testing.T) {
 		if err := jsonTester("failed to decode Round 2 data", errDecodeJSON, r2, decoded,
 			jsonTesterBaddie{
 				fmt.Sprintf("\"secretShare\":\"%s\"", r2.SecretShare.Hex()),
-				fmt.Sprintf("\"secretShare\":\"%s\"", hex.EncodeToString(badScalar(t, c.group))),
+				fmt.Sprintf("\"secretShare\":\"%s\"", hex.EncodeToString(debug.BadScalarHigh(c.group))),
 				"failed to decode Round 2 data: scalar DecodeHex: ",
 			}); err != nil {
 			t.Fatal(err)
@@ -302,7 +254,7 @@ func TestSignature_Decode_Fail(t *testing.T) {
 		}
 
 		// Bytes: Bad R
-		bad := slices.Replace(encoded, 1, 1+c.group.ElementLength(), badElement(t, c.group)...)
+		bad := slices.Replace(encoded, 1, 1+c.group.ElementLength(), debug.BadElementOffCurve(c.group)...)
 		if err := decoded.Decode(bad); err == nil || !strings.HasPrefix(err.Error(), errDecodeR) {
 			t.Fatalf("expected error %q, got %q", errDecodeR, err)
 		}
@@ -313,7 +265,7 @@ func TestSignature_Decode_Fail(t *testing.T) {
 			encoded,
 			1+c.group.ElementLength(),
 			1+c.group.ElementLength()+c.group.ScalarLength(),
-			badScalar(t, c.group)...)
+			debug.BadScalarHigh(c.group)...)
 		if err := decoded.Decode(bad); err == nil || !strings.HasPrefix(err.Error(), errDecodeZ) {
 			t.Fatalf("expected error %q, got %q", errDecodeZ, err)
 		}

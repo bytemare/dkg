@@ -121,7 +121,7 @@ func Example_dkg() {
 		panic(err)
 	}
 
-	if groupPublicKey1.Equal(groupPublicKey2) != 1 || groupPublicKey1.Equal(groupPublicKey3) != 1 {
+	if !groupPublicKey1.Equal(groupPublicKey2) || !groupPublicKey1.Equal(groupPublicKey3) {
 		panic("group public key recovery failed")
 	}
 
@@ -159,7 +159,7 @@ func Example_dkg() {
 	}
 
 	groupPubKey := g.Base().Multiply(recombinedSecret)
-	if groupPubKey.Equal(groupPublicKey3) != 1 {
+	if !groupPubKey.Equal(groupPublicKey3) {
 		panic("failed to recover the correct group secret")
 	}
 

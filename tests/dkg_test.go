@@ -15,7 +15,7 @@ import (
 	"strings"
 	"testing"
 
-	group "github.com/bytemare/crypto"
+	"github.com/bytemare/ecc"
 	secretsharing "github.com/bytemare/secret-sharing"
 	"github.com/bytemare/secret-sharing/keys"
 
@@ -58,11 +58,11 @@ func TestCompleteDKG(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if keyShare.GroupPublicKey.Equal(pubKey) != 1 {
+			if !keyShare.GroupPublicKey.Equal(pubKey) {
 				t.Fatalf("expected same public key")
 			}
 
-			if keyShare.PublicKey.Equal(c.group.Base().Multiply(keyShare.Secret)) != 1 {
+			if !keyShare.PublicKey.Equal(c.group.Base().Multiply(keyShare.Secret)) {
 				t.Fatal("expected equality")
 			}
 
@@ -97,7 +97,7 @@ func TestCompleteDKG(t *testing.T) {
 			}
 
 			pk := c.group.Base().Multiply(secret)
-			if pk.Equal(pubKey) != 1 {
+			if !pk.Equal(pubKey) {
 				t.Fatal("expected recovered secret to be compatible with public key")
 			}
 		}
@@ -208,11 +208,11 @@ func TestCiphersuite_Available(t *testing.T) {
 
 func TestCiphersuite_Group(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
-		if group.Group(c.ciphersuite) != c.group {
+		if ecc.Group(c.ciphersuite) != c.group {
 			t.Fatal(errUnexpectedCiphersuiteGroup)
 		}
 
-		if c.ciphersuite.Group() != group.Group(c.ciphersuite) {
+		if c.ciphersuite.Group() != ecc.Group(c.ciphersuite) {
 			t.Fatal(errUnexpectedCiphersuiteGroup)
 		}
 	})
@@ -241,7 +241,7 @@ func TestCiphersuite_BadID(t *testing.T) {
 	}
 }
 
-func testMakePolynomial(g group.Group, n uint16) secretsharing.Polynomial {
+func testMakePolynomial(g ecc.Group, n uint16) secretsharing.Polynomial {
 	p := secretsharing.NewPolynomial(n)
 	for i := range n {
 		p[i] = g.NewScalar().Random()
@@ -301,13 +301,13 @@ func TestCiphersuite_NewParticipant_Bad_PolynomialLength(t *testing.T) {
 	errPolynomialLength := errors.New("invalid polynomial length")
 
 	testAllCases(t, func(c *testCase) {
-		poly := make([]*group.Scalar, c.threshold-1)
+		poly := make([]*ecc.Scalar, c.threshold-1)
 		if _, err := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants, poly...); err == nil ||
 			err.Error() != errPolynomialLength.Error() {
 			t.Fatalf("expected error %q, got %q", errPolynomialLength, err)
 		}
 
-		poly = make([]*group.Scalar, c.threshold+1)
+		poly = make([]*ecc.Scalar, c.threshold+1)
 		if _, err := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants, poly...); err == nil ||
 			err.Error() != errPolynomialLength.Error() {
 			t.Fatalf("expected error %q, got %q", errPolynomialLength, err)
@@ -319,7 +319,7 @@ func TestCiphersuite_NewParticipant_Bad_PolyHasNilCoeff(t *testing.T) {
 	errPolyHasNilCoeff := errors.New("invalid polynomial: the polynomial has a nil coefficient")
 
 	testAllCases(t, func(c *testCase) {
-		poly := make([]*group.Scalar, c.threshold)
+		poly := make([]*ecc.Scalar, c.threshold)
 		if _, err := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants, poly...); err == nil ||
 			err.Error() != errPolyHasNilCoeff.Error() {
 			t.Fatalf("expected error %q, got %q", errPolyHasNilCoeff, err)
@@ -645,7 +645,7 @@ func TestParticipant_Finalize_Bad_CommitmentEmpty(t *testing.T) {
 			t.Fatalf("expected error %q, got %q", expectedError, err)
 		}
 
-		r1[3].Commitment = []*group.Element{}
+		r1[3].Commitment = []*ecc.Element{}
 		expectedError = errCommitmentEmpty.Error() + ": 4"
 		if _, err := p[0].Finalize(r1, d); err == nil || err.Error() != expectedError {
 			t.Fatalf("expected error %q, got %q", expectedError, err)

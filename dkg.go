@@ -14,7 +14,7 @@ import (
 	"errors"
 	"fmt"
 
-	group "github.com/bytemare/crypto"
+	"github.com/bytemare/ecc"
 	secretsharing "github.com/bytemare/secret-sharing"
 	"github.com/bytemare/secret-sharing/keys"
 )
@@ -24,28 +24,28 @@ type Ciphersuite byte
 
 const (
 	// Ristretto255Sha512 identifies the Ristretto255 group and SHA-512.
-	Ristretto255Sha512 = Ciphersuite(group.Ristretto255Sha512)
+	Ristretto255Sha512 = Ciphersuite(ecc.Ristretto255Sha512)
 
 	// decaf448Shake256 identifies the Decaf448 group and Shake-256. Not supported.
 	// decaf448Shake256 = 2.
 
 	// P256Sha256 identifies the NIST P-256 group and SHA-256.
-	P256Sha256 = Ciphersuite(group.P256Sha256)
+	P256Sha256 = Ciphersuite(ecc.P256Sha256)
 
 	// P384Sha384 identifies the NIST P-384 group and SHA-384.
-	P384Sha384 = Ciphersuite(group.P384Sha384)
+	P384Sha384 = Ciphersuite(ecc.P384Sha384)
 
 	// P521Sha512 identifies the NIST P-512 group and SHA-512.
-	P521Sha512 = Ciphersuite(group.P521Sha512)
+	P521Sha512 = Ciphersuite(ecc.P521Sha512)
 
 	// Edwards25519Sha512 identifies the Edwards25519 group and SHA2-512.
-	Edwards25519Sha512 = Ciphersuite(group.Edwards25519Sha512)
+	Edwards25519Sha512 = Ciphersuite(ecc.Edwards25519Sha512)
 
 	// Secp256k1 identifies the SECp256k1 group and SHA-256.
-	Secp256k1 = Ciphersuite(group.Secp256k1)
+	Secp256k1 = Ciphersuite(ecc.Secp256k1Sha256)
 )
 
-// Available returns whether the Ciphersuite is supported, useful to avoid casting to an unsupported group.
+// Available returns whether the Ciphersuite is supported, useful to avoid casting to an unsupported group identifier.
 func (c Ciphersuite) Available() bool {
 	switch c {
 	case Ristretto255Sha512, P256Sha256, P384Sha384, P521Sha512, Edwards25519Sha512, Secp256k1:
@@ -56,12 +56,12 @@ func (c Ciphersuite) Available() bool {
 }
 
 // Group returns the elliptic curve group used in the ciphersuite.
-func (c Ciphersuite) Group() group.Group {
+func (c Ciphersuite) Group() ecc.Group {
 	if !c.Available() {
 		return 0
 	}
 
-	return group.Group(c)
+	return ecc.Group(c)
 }
 
 func checkPolynomial(threshold uint16, p secretsharing.Polynomial) error {
@@ -86,7 +86,7 @@ var errIDOutOfRange = errors.New("identifier is above authorized range")
 func (c Ciphersuite) NewParticipant(
 	id uint16,
 	threshold, maxSigners uint16,
-	polynomial ...*group.Scalar,
+	polynomial ...*ecc.Scalar,
 ) (*Participant, error) {
 	if !c.Available() {
 		return nil, errInvalidCiphersuite
@@ -105,7 +105,7 @@ func (c Ciphersuite) NewParticipant(
 		config: &config{
 			maxSigners: maxSigners,
 			threshold:  threshold,
-			group:      group.Group(c),
+			group:      ecc.Group(c),
 		},
 		secrets: &secrets{
 			secretShare: nil,
@@ -127,18 +127,18 @@ func (c Ciphersuite) NewParticipant(
 type Participant struct {
 	*secrets
 	*config
-	commitment []*group.Element
+	commitment []*ecc.Element
 	Identifier uint16
 }
 
 type config struct {
 	maxSigners uint16
 	threshold  uint16
-	group      group.Group
+	group      ecc.Group
 }
 
 type secrets struct {
-	secretShare *group.Scalar
+	secretShare *ecc.Scalar
 	polynomial  secretsharing.Polynomial
 }
 
@@ -148,7 +148,7 @@ func (p *Participant) resetPolynomial() {
 	}
 }
 
-func (p *Participant) initPoly(polynomial ...*group.Scalar) error {
+func (p *Participant) initPoly(polynomial ...*ecc.Scalar) error {
 	p.polynomial = secretsharing.NewPolynomial(p.threshold)
 
 	if len(polynomial) != 0 {
@@ -177,7 +177,7 @@ func (p *Participant) Start() *Round1Data {
 
 // StartWithRandom returns a participant's output for the first round and allows setting the random input for the NIZK
 // proof.
-func (p *Participant) StartWithRandom(random *group.Scalar) *Round1Data {
+func (p *Participant) StartWithRandom(random *ecc.Scalar) *Round1Data {
 	package1 := &Round1Data{
 		Group:            p.group,
 		SenderIdentifier: p.Identifier,
@@ -233,7 +233,7 @@ func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint16]*Round2Data,
 	return r2data, nil
 }
 
-func getCommitment(r1DataSet []*Round1Data, id uint16) ([]*group.Element, error) {
+func getCommitment(r1DataSet []*Round1Data, id uint16) ([]*ecc.Element, error) {
 	for _, r1d := range r1DataSet {
 		if r1d.SenderIdentifier == id {
 			if len(r1d.Commitment) == 0 {
@@ -263,7 +263,7 @@ func (p *Participant) checkRound2DataHeader(d *Round2Data) error {
 	return nil
 }
 
-func (p *Participant) verifyRound2Data(r1 []*Round1Data, r2 *Round2Data) (*group.Element, error) {
+func (p *Participant) verifyRound2Data(r1 []*Round1Data, r2 *Round2Data) (*ecc.Element, error) {
 	if err := p.checkRound2DataHeader(r2); err != nil {
 		return nil, err
 	}
@@ -322,7 +322,7 @@ func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data)
 	}, nil
 }
 
-func (p *Participant) verifyCommitmentPublicKey(id uint16, share *group.Scalar, commitment []*group.Element) error {
+func (p *Participant) verifyCommitmentPublicKey(id uint16, share *ecc.Scalar, commitment []*ecc.Element) error {
 	pk := p.group.Base().Multiply(share)
 	if !secretsharing.Verify(p.group, p.Identifier, pk, commitment) {
 		return fmt.Errorf(
@@ -336,12 +336,12 @@ func (p *Participant) verifyCommitmentPublicKey(id uint16, share *group.Scalar, 
 }
 
 // GroupPublicKeyFromRound1 returns the global public key, usable to verify signatures produced in a threshold scheme.
-func GroupPublicKeyFromRound1(c Ciphersuite, r1DataSet []*Round1Data) (*group.Element, error) {
+func GroupPublicKeyFromRound1(c Ciphersuite, r1DataSet []*Round1Data) (*ecc.Element, error) {
 	if !c.Available() {
 		return nil, errInvalidCiphersuite
 	}
 
-	g := group.Group(c)
+	g := ecc.Group(c)
 	pubKey := g.NewElement()
 
 	for _, d := range r1DataSet {
@@ -353,12 +353,12 @@ func GroupPublicKeyFromRound1(c Ciphersuite, r1DataSet []*Round1Data) (*group.El
 
 // GroupPublicKeyFromCommitments returns the threshold's setup group public key, given all the commitments from all the
 // participants.
-func GroupPublicKeyFromCommitments(c Ciphersuite, commitments [][]*group.Element) (*group.Element, error) {
+func GroupPublicKeyFromCommitments(c Ciphersuite, commitments [][]*ecc.Element) (*ecc.Element, error) {
 	if !c.Available() {
 		return nil, errInvalidCiphersuite
 	}
 
-	g := group.Group(c)
+	g := ecc.Group(c)
 	pubKey := g.NewElement()
 
 	for _, com := range commitments {
@@ -369,7 +369,7 @@ func GroupPublicKeyFromCommitments(c Ciphersuite, commitments [][]*group.Element
 }
 
 // ComputeParticipantPublicKey computes the verification share for participant id given the commitments of round 1.
-func ComputeParticipantPublicKey(c Ciphersuite, id uint16, commitments [][]*group.Element) (*group.Element, error) {
+func ComputeParticipantPublicKey(c Ciphersuite, id uint16, commitments [][]*ecc.Element) (*ecc.Element, error) {
 	if !c.Available() {
 		return nil, errInvalidCiphersuite
 	}
@@ -378,7 +378,7 @@ func ComputeParticipantPublicKey(c Ciphersuite, id uint16, commitments [][]*grou
 		return nil, errMissingCommitment
 	}
 
-	g := group.Group(c)
+	g := ecc.Group(c)
 	pk := g.NewElement().Identity()
 
 	for _, commitment := range commitments {
@@ -399,7 +399,7 @@ func ComputeParticipantPublicKey(c Ciphersuite, id uint16, commitments [][]*grou
 
 // VerifyPublicKey verifies if the pubKey associated to id is valid given the public VSS commitments of the other
 // participants.
-func VerifyPublicKey(c Ciphersuite, id uint16, pubKey *group.Element, commitments [][]*group.Element) error {
+func VerifyPublicKey(c Ciphersuite, id uint16, pubKey *ecc.Element, commitments [][]*ecc.Element) error {
 	if !c.Available() {
 		return errInvalidCiphersuite
 	}
@@ -413,7 +413,7 @@ func VerifyPublicKey(c Ciphersuite, id uint16, pubKey *group.Element, commitment
 		return err
 	}
 
-	if pubKey.Equal(yi) != 1 {
+	if !pubKey.Equal(yi) {
 		return fmt.Errorf("%w: want %q got %q",
 			errVerificationShareFailed,
 			yi.Hex(),
@@ -425,8 +425,8 @@ func VerifyPublicKey(c Ciphersuite, id uint16, pubKey *group.Element, commitment
 }
 
 // VSSCommitmentsFromRegistry returns all the commitments for the set of PublicKeyShares in the registry.
-func VSSCommitmentsFromRegistry(registry *keys.PublicKeyShareRegistry) [][]*group.Element {
-	c := make([][]*group.Element, 0, len(registry.PublicKeyShares))
+func VSSCommitmentsFromRegistry(registry *keys.PublicKeyShareRegistry) [][]*ecc.Element {
+	c := make([][]*ecc.Element, 0, len(registry.PublicKeyShares))
 
 	for _, pks := range registry.PublicKeyShares {
 		c = append(c, pks.VssCommitment)

@@ -12,7 +12,7 @@ import (
 	"errors"
 	"testing"
 
-	group "github.com/bytemare/crypto"
+	"github.com/bytemare/ecc"
 
 	"github.com/bytemare/dkg"
 )
@@ -40,14 +40,14 @@ type testCase struct {
 	threshold       uint16
 	maxParticipants uint16
 	ciphersuite     dkg.Ciphersuite
-	group           group.Group
+	group           ecc.Group
 }
 
 var testTable = []*testCase{
 	{
 		name:            "Ristretto255 (3,5)",
 		ciphersuite:     dkg.Ristretto255Sha512,
-		group:           group.Ristretto255Sha512,
+		group:           ecc.Ristretto255Sha512,
 		threshold:       3,
 		maxParticipants: 5,
 		zk: testZKVector{
@@ -62,7 +62,7 @@ var testTable = []*testCase{
 	{
 		name:            "P-256 (3,5)",
 		ciphersuite:     dkg.P256Sha256,
-		group:           group.P256Sha256,
+		group:           ecc.P256Sha256,
 		threshold:       3,
 		maxParticipants: 5,
 		zk: testZKVector{
@@ -77,7 +77,7 @@ var testTable = []*testCase{
 	{
 		name:            "P-384 (3,5)",
 		ciphersuite:     dkg.P384Sha384,
-		group:           group.P384Sha384,
+		group:           ecc.P384Sha384,
 		threshold:       3,
 		maxParticipants: 5,
 		zk: testZKVector{
@@ -92,7 +92,7 @@ var testTable = []*testCase{
 	{
 		name:            "P-521 (3,5)",
 		ciphersuite:     dkg.P521Sha512,
-		group:           group.P521Sha512,
+		group:           ecc.P521Sha512,
 		threshold:       3,
 		maxParticipants: 5,
 		zk: testZKVector{
@@ -107,7 +107,7 @@ var testTable = []*testCase{
 	{
 		name:            "Edwards25519 (3,5)",
 		ciphersuite:     dkg.Edwards25519Sha512,
-		group:           group.Edwards25519Sha512,
+		group:           ecc.Edwards25519Sha512,
 		threshold:       3,
 		maxParticipants: 5,
 		zk: testZKVector{
@@ -122,7 +122,7 @@ var testTable = []*testCase{
 	{
 		name:            "SECp256k1 (3,5)",
 		ciphersuite:     dkg.Secp256k1,
-		group:           group.Secp256k1,
+		group:           ecc.Secp256k1Sha256,
 		threshold:       3,
 		maxParticipants: 5,
 		zk: testZKVector{

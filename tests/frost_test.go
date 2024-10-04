@@ -13,12 +13,12 @@ import (
 	"fmt"
 	"testing"
 
-	group "github.com/bytemare/crypto"
+	"github.com/bytemare/ecc"
 
 	"github.com/bytemare/dkg"
 )
 
-func readHexScalar(t *testing.T, g group.Group, input string) *group.Scalar {
+func readHexScalar(t *testing.T, g ecc.Group, input string) *ecc.Scalar {
 	s := g.NewScalar()
 	if err := s.DecodeHex(input); err != nil {
 		t.Fatal(err)
@@ -27,7 +27,7 @@ func readHexScalar(t *testing.T, g group.Group, input string) *group.Scalar {
 	return s
 }
 
-func readHexElement(t *testing.T, g group.Group, input string) *group.Element {
+func readHexElement(t *testing.T, g ecc.Group, input string) *ecc.Element {
 	s := g.NewElement()
 	if err := s.DecodeHex(input); err != nil {
 		t.Fatal(err)
@@ -54,11 +54,11 @@ func TestFrostGenerateZeroKnowledgeProof(t *testing.T) {
 			t.Fatal()
 		}
 
-		if r.Equal(s.R) != 1 {
+		if !r.Equal(s.R) {
 			t.Fatal()
 		}
 
-		if z.Equal(s.Z) != 1 {
+		if !z.Equal(s.Z) {
 			t.Fatal()
 		}
 	})
