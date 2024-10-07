@@ -51,14 +51,14 @@ func TestCompleteDKG(t *testing.T) {
 		quals := []uint16{1, 3, 5}
 		keyShares := make([]*keys.KeyShare, 0, len(quals))
 		registry := keys.NewPublicKeyShareRegistry(c.group, c.threshold, c.maxParticipants)
-		pubKey, _ := dkg.GroupPublicKeyFromRound1(c.ciphersuite, r1)
+		pubKey, _ := dkg.VerificationKeyFromRound1(c.ciphersuite, r1)
 		for _, participant := range p {
 			keyShare, err := participant.Finalize(r1, r2[participant.Identifier])
 			if err != nil {
 				t.Fatal(err)
 			}
 
-			if !keyShare.GroupPublicKey.Equal(pubKey) {
+			if !keyShare.VerificationKey.Equal(pubKey) {
 				t.Fatalf("expected same public key")
 			}
 
@@ -174,7 +174,7 @@ func makeRegistry(t *testing.T, c *testCase, keyShares []*keys.KeyShare) *keys.P
 	}
 
 	var err error
-	registry.GroupPublicKey, err = dkg.GroupPublicKeyFromCommitments(
+	registry.VerificationKey, err = dkg.VerificationKeyFromCommitments(
 		c.ciphersuite,
 		dkg.VSSCommitmentsFromRegistry(registry),
 	)
@@ -808,15 +808,15 @@ func TestComputeParticipantPublicKey_Bad_CommitmentNilElement(t *testing.T) {
 	})
 }
 
-func TestGroupPublicKey_BadCipher(t *testing.T) {
+func TestVerificationKey_BadCipher(t *testing.T) {
 	errInvalidCiphersuite := errors.New("invalid ciphersuite")
 
-	if _, err := dkg.GroupPublicKeyFromRound1(dkg.Ciphersuite(2), nil); err == nil ||
+	if _, err := dkg.VerificationKeyFromRound1(dkg.Ciphersuite(2), nil); err == nil ||
 		err.Error() != errInvalidCiphersuite.Error() {
 		t.Fatalf("expected %q, got %q", errInvalidCiphersuite, err)
 	}
 
-	if _, err := dkg.GroupPublicKeyFromCommitments(dkg.Ciphersuite(2), nil); err == nil ||
+	if _, err := dkg.VerificationKeyFromCommitments(dkg.Ciphersuite(2), nil); err == nil ||
 		err.Error() != errInvalidCiphersuite.Error() {
 		t.Fatalf("expected %q, got %q", errInvalidCiphersuite, err)
 	}

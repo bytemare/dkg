@@ -2,7 +2,6 @@
 [![dkg](https://github.com/bytemare/dkg/actions/workflows/code-scan.yml/badge.svg)](https://github.com/bytemare/dkg/actions/workflows/code-scan.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/bytemare/dkg.svg)](https://pkg.go.dev/github.com/bytemare/dkg)
 [![codecov](https://codecov.io/gh/bytemare/dkg/branch/main/graph/badge.svg?token=5bQfB0OctA)](https://codecov.io/gh/bytemare/dkg)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/bytemare/dkg/badge)](https://securityscorecards.dev/viewer/?uri=github.com/bytemare/dkg)
 
 ```
   import "github.com/bytemare/dkg"

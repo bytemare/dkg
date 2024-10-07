@@ -107,25 +107,28 @@ func Example_dkg() {
 	}
 
 	// Optional: There are multiple ways on how you can get the group's public key (the one used for signature validation)
-	// 1. Participant's Finalize() function returns a KeyShare, which contains the GroupPublicKey, which can be sent to
+	// 1. Participant's Finalize() function returns a KeyShare, which contains the VerificationKey, which can be sent to
 	// the coordinator or registry.
 	// 2. Using the commitments in the Round1 data, this is convenient during protocol execution.
 	// 3. Using the participants' commitments in their public key share, this is convenient after protocol execution.
-	groupPublicKey1 := keyShares[0].GroupPublicKey
-	groupPublicKey2, err := dkg.GroupPublicKeyFromRound1(c, decodedRound1Data)
+	verificationKey1 := keyShares[0].VerificationKey
+	verificationKey2, err := dkg.VerificationKeyFromRound1(c, decodedRound1Data)
 	if err != nil {
 		panic(err)
 	}
-	groupPublicKey3, err := dkg.GroupPublicKeyFromCommitments(c, dkg.VSSCommitmentsFromRegistry(PublicKeyShareRegistry))
+	verificationKey3, err := dkg.VerificationKeyFromCommitments(
+		c,
+		dkg.VSSCommitmentsFromRegistry(PublicKeyShareRegistry),
+	)
 	if err != nil {
 		panic(err)
 	}
 
-	if !groupPublicKey1.Equal(groupPublicKey2) || !groupPublicKey1.Equal(groupPublicKey3) {
+	if !verificationKey1.Equal(verificationKey2) || !verificationKey2.Equal(verificationKey3) {
 		panic("group public key recovery failed")
 	}
 
-	PublicKeyShareRegistry.GroupPublicKey = groupPublicKey3
+	PublicKeyShareRegistry.VerificationKey = verificationKey3
 
 	// A registry can be encoded for backup or transmission.
 	encodedRegistry := PublicKeyShareRegistry.Encode()
@@ -159,7 +162,7 @@ func Example_dkg() {
 	}
 
 	groupPubKey := g.Base().Multiply(recombinedSecret)
-	if !groupPubKey.Equal(groupPublicKey3) {
+	if !groupPubKey.Equal(verificationKey3) {
 		panic("failed to recover the correct group secret")
 	}
 
