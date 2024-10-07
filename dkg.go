@@ -295,7 +295,7 @@ func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data)
 	}
 
 	secretKey := p.group.NewScalar()
-	groupPublic := p.group.NewElement()
+	verificationKey := p.group.NewElement()
 
 	for _, data := range r2DataSet {
 		peerCommitment, err := p.verifyRound2Data(r1DataSet, data)
@@ -304,15 +304,15 @@ func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data)
 		}
 
 		secretKey.Add(data.SecretShare)
-		groupPublic.Add(peerCommitment)
+		verificationKey.Add(peerCommitment)
 	}
 
 	secretKey.Add(p.secretShare)
 	p.secretShare.Zero()
 
 	return &keys.KeyShare{
-		Secret:         secretKey,
-		GroupPublicKey: groupPublic.Add(p.commitment[0]),
+		Secret:          secretKey,
+		VerificationKey: verificationKey.Add(p.commitment[0]),
 		PublicKeyShare: keys.PublicKeyShare{
 			PublicKey:     p.group.Base().Multiply(secretKey),
 			VssCommitment: p.commitment,
@@ -335,8 +335,8 @@ func (p *Participant) verifyCommitmentPublicKey(id uint16, share *ecc.Scalar, co
 	return nil
 }
 
-// GroupPublicKeyFromRound1 returns the global public key, usable to verify signatures produced in a threshold scheme.
-func GroupPublicKeyFromRound1(c Ciphersuite, r1DataSet []*Round1Data) (*ecc.Element, error) {
+// VerificationKeyFromRound1 returns the global public key, usable to verify signatures produced in a threshold scheme.
+func VerificationKeyFromRound1(c Ciphersuite, r1DataSet []*Round1Data) (*ecc.Element, error) {
 	if !c.Available() {
 		return nil, errInvalidCiphersuite
 	}
@@ -351,9 +351,9 @@ func GroupPublicKeyFromRound1(c Ciphersuite, r1DataSet []*Round1Data) (*ecc.Elem
 	return pubKey, nil
 }
 
-// GroupPublicKeyFromCommitments returns the threshold's setup group public key, given all the commitments from all the
+// VerificationKeyFromCommitments returns the threshold's setup group public key, given all the commitments from all the
 // participants.
-func GroupPublicKeyFromCommitments(c Ciphersuite, commitments [][]*ecc.Element) (*ecc.Element, error) {
+func VerificationKeyFromCommitments(c Ciphersuite, commitments [][]*ecc.Element) (*ecc.Element, error) {
 	if !c.Available() {
 		return nil, errInvalidCiphersuite
 	}
