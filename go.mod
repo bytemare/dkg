@@ -3,7 +3,7 @@ module github.com/bytemare/dkg
 go 1.23.1
 
 require (
-	filippo.io/edwards25519 v1.1.0
+	filippo.io/edwards25519 v1.1.1
 	github.com/bytemare/ecc v0.8.2
 	github.com/bytemare/hash v0.3.0
 	github.com/bytemare/secret-sharing v0.7.0
