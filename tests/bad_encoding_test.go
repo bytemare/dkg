@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Copyright (C) 2024 Daniel Bourdrez. All Rights Reserved.
+// Copyright (C) 2026 Daniel Bourdrez. All Rights Reserved.
 //
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree or at
@@ -33,7 +33,7 @@ func TestRound1_Decode_Fail(t *testing.T) {
 
 	testAllCases(t, func(c *testCase) {
 		p, _ := c.ciphersuite.NewParticipant(1, c.threshold, c.maxParticipants)
-		r1 := p.Start()
+		r1 := mustStart(t, p)
 		decoded := new(dkg.Round1Data)
 
 		// nil or len = 0
@@ -78,7 +78,8 @@ func TestRound1_Decode_Fail(t *testing.T) {
 			data,
 			5+c.group.ElementLength(),
 			5+c.group.ElementLength()+c.group.ScalarLength(),
-			debug.BadScalarHigh(c.group)...)
+			debug.BadScalarHigh(c.group)...,
+		)
 
 		if err := decoded.Decode(bad); err == nil || !strings.HasPrefix(err.Error(), errDecodeProofZ) {
 			t.Fatalf("expected error %q, got %q", errDecodeProofZ, err)
@@ -105,13 +106,14 @@ func TestRound1_Decode_Fail(t *testing.T) {
 		}
 
 		// JSON
-		errDecodeJSON := "failed to decode Round 1 data: failed to decode Signature: invalid JSON encoding"
+		errDecodeJSON := "failed to decode Round 1 data: failed to decode Signature:"
 
-		if err := jsonTester("failed to decode Round 1 data", errDecodeJSON, r1, decoded,
+		if err := jsonTester(
+			"failed to decode Round 1 data", errDecodeJSON, r1, decoded,
 			jsonTesterBaddie{
-				fmt.Sprintf("\"r\":\"%s\"", r1.ProofOfKnowledge.R.Hex()),
-				fmt.Sprintf("\"r\":\"%s\"", hex.EncodeToString(debug.BadElementOffCurve(c.group))),
-				"failed to decode Round 1 data: failed to decode Signature: element DecodeHex: ",
+				fmt.Sprintf("\"data\":\"%s\"", r1.ProofOfKnowledge.R.Hex()),
+				fmt.Sprintf("\"data\":\"%s\"", hex.EncodeToString(debug.BadElementOffCurve(c.group))),
+				"failed to decode Round 1 data: failed to decode Signature:",
 			},
 			jsonTesterBaddie{
 				"commitment\"",
@@ -201,13 +203,13 @@ func TestRound2_Decode_Fail(t *testing.T) {
 		}
 
 		// JSON
-		errDecodeJSON := "failed to decode Round 2 data: invalid JSON encoding"
+		errDecodeJSON := "failed to decode Round 2 data:"
 
 		if err := jsonTester("failed to decode Round 2 data", errDecodeJSON, r2, decoded,
 			jsonTesterBaddie{
-				fmt.Sprintf("\"secretShare\":\"%s\"", r2.SecretShare.Hex()),
-				fmt.Sprintf("\"secretShare\":\"%s\"", hex.EncodeToString(debug.BadScalarHigh(c.group))),
-				"failed to decode Round 2 data: scalar DecodeHex: ",
+				fmt.Sprintf("\"data\":\"%s\"", r2.SecretShare.Hex()),
+				fmt.Sprintf("\"data\":\"%s\"", hex.EncodeToString(debug.BadScalarHigh(c.group))),
+				"failed to decode Round 2 data:",
 			}); err != nil {
 			t.Fatal(err)
 		}
@@ -217,13 +219,13 @@ func TestRound2_Decode_Fail(t *testing.T) {
 func TestSignature_Decode_Fail(t *testing.T) {
 	errDecodeInvalidLength := "failed to decode Signature: invalid encoding length"
 	errInvalidCiphersuite := "failed to decode Signature: invalid ciphersuite"
-	errDecodeR := "failed to decode Signature: invalid encoding of R proof: element Decode: "
-	errDecodeZ := "failed to decode Signature: invalid encoding of z proof: scalar Decode: "
+	errDecodeR := "failed to decode Signature: invalid encoding of R proof: decoding element"
+	errDecodeZ := "failed to decode Signature: invalid encoding of z proof: decoding scalar"
 	errDecodeHex := "failed to decode Signature: encoding/hex: odd length hex string"
 
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
-		signature := p[0].Start().ProofOfKnowledge
+		signature := mustStart(t, p[0]).ProofOfKnowledge
 		decoded := new(dkg.Signature)
 
 		// nil or len = 0
@@ -265,7 +267,8 @@ func TestSignature_Decode_Fail(t *testing.T) {
 			encoded,
 			1+c.group.ElementLength(),
 			1+c.group.ElementLength()+c.group.ScalarLength(),
-			debug.BadScalarHigh(c.group)...)
+			debug.BadScalarHigh(c.group)...,
+		)
 		if err := decoded.Decode(bad); err == nil || !strings.HasPrefix(err.Error(), errDecodeZ) {
 			t.Fatalf("expected error %q, got %q", errDecodeZ, err)
 		}
@@ -276,16 +279,149 @@ func TestSignature_Decode_Fail(t *testing.T) {
 		}
 
 		// JSON
-		errDecodeJSON := "failed to decode Signature: invalid JSON encoding"
+		errDecodeJSON := "failed to decode Signature:"
 
 		if err := jsonTester("failed to decode Signature", errDecodeJSON, signature, decoded,
 			jsonTesterBaddie{
-				fmt.Sprintf("\"r\":\"%s\"", signature.R.Hex()),
-				fmt.Sprintf("\"r\":\"%s\"", hex.EncodeToString(bad)),
-				"failed to decode Signature: element DecodeHex: ",
+				fmt.Sprintf("\"data\":\"%s\"", signature.R.Hex()),
+				fmt.Sprintf("\"data\":\"%s\"", hex.EncodeToString(bad)),
+				"failed to decode Signature:",
 			}); err != nil {
 			t.Fatal(err)
 		}
+	})
+}
+
+func TestSignature_Encode_Hardening(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		t.Run("nil receiver", func(t *testing.T) {
+			var s *dkg.Signature
+			if has, err := hasPanic(func() {
+				if got := s.Encode(); got != nil {
+					t.Fatalf("expected nil encoding, got %x", got)
+				}
+				if got := s.Hex(); got != "" {
+					t.Fatalf("expected empty hex, got %q", got)
+				}
+			}); has {
+				t.Fatalf("unexpected panic: %v", err)
+			}
+		})
+
+		t.Run("malformed wrapper", func(t *testing.T) {
+			s := &dkg.Signature{
+				Group: c.group,
+				R:     new(ecc.Element),
+				Z:     new(ecc.Scalar),
+			}
+
+			if has, err := hasPanic(func() {
+				if got := s.Encode(); got != nil {
+					t.Fatalf("expected nil encoding, got %x", got)
+				}
+				if got := s.Hex(); got != "" {
+					t.Fatalf("expected empty hex, got %q", got)
+				}
+			}); has {
+				t.Fatalf("unexpected panic: %v", err)
+			}
+		})
+	})
+}
+
+func TestRound1Data_Encode_Hardening(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		p := c.makeParticipants(t)
+		r1 := mustStart(t, p[0])
+
+		t.Run("nil receiver", func(t *testing.T) {
+			var d *dkg.Round1Data
+			if has, err := hasPanic(func() {
+				if got := d.Encode(); got != nil {
+					t.Fatalf("expected nil encoding, got %x", got)
+				}
+				if got := d.Hex(); got != "" {
+					t.Fatalf("expected empty hex, got %q", got)
+				}
+			}); has {
+				t.Fatalf("unexpected panic: %v", err)
+			}
+		})
+
+		t.Run("malformed proof", func(t *testing.T) {
+			d := cloneRound1(t, r1)
+			d.ProofOfKnowledge = &dkg.Signature{
+				Group: c.group,
+				R:     new(ecc.Element),
+				Z:     new(ecc.Scalar),
+			}
+
+			if has, err := hasPanic(func() {
+				if got := d.Encode(); got != nil {
+					t.Fatalf("expected nil encoding, got %x", got)
+				}
+				if got := d.Hex(); got != "" {
+					t.Fatalf("expected empty hex, got %q", got)
+				}
+			}); has {
+				t.Fatalf("unexpected panic: %v", err)
+			}
+		})
+
+		t.Run("malformed commitment", func(t *testing.T) {
+			d := cloneRound1(t, r1)
+			d.Commitment[0] = new(ecc.Element)
+
+			if has, err := hasPanic(func() {
+				if got := d.Encode(); got != nil {
+					t.Fatalf("expected nil encoding, got %x", got)
+				}
+				if got := d.Hex(); got != "" {
+					t.Fatalf("expected empty hex, got %q", got)
+				}
+			}); has {
+				t.Fatalf("unexpected panic: %v", err)
+			}
+		})
+	})
+}
+
+func TestRound2Data_Encode_Hardening(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		p := c.makeParticipants(t)
+		r1 := c.runRound1(p)
+		r2 := c.runRound2(t, p, r1)
+		d := r2[p[0].Identifier][0]
+
+		t.Run("nil receiver", func(t *testing.T) {
+			var r *dkg.Round2Data
+			if has, err := hasPanic(func() {
+				if got := r.Encode(); got != nil {
+					t.Fatalf("expected nil encoding, got %x", got)
+				}
+				if got := r.Hex(); got != "" {
+					t.Fatalf("expected empty hex, got %q", got)
+				}
+			}); has {
+				t.Fatalf("unexpected panic: %v", err)
+			}
+		})
+
+		t.Run("malformed share", func(t *testing.T) {
+			copyD := *d
+			copyD.SecretShare = new(ecc.Scalar)
+
+			if has, err := hasPanic(func() {
+				if got := copyD.Encode(); got != nil {
+					t.Fatalf("expected nil encoding, got %x", got)
+				}
+				if got := copyD.Hex(); got != "" {
+					t.Fatalf("expected empty hex, got %q", got)
+				}
+			}); has {
+				t.Fatalf("unexpected panic: %v", err)
+			}
+		})
 	})
 }
 
@@ -343,7 +479,7 @@ func testJSONBaddie(in any, decoded json.Unmarshaler, baddie jsonTesterBaddie) e
 	return nil
 }
 
-func jsonTester(errPrefix, badJSONErr string, in any, decoded json.Unmarshaler, baddies ...jsonTesterBaddie) error {
+func jsonTester(errPrefix, _ string, in any, decoded json.Unmarshaler, baddies ...jsonTesterBaddie) error {
 	errInvalidCiphersuite := errPrefix + ": invalid ciphersuite"
 
 	// JSON: bad json
@@ -383,7 +519,7 @@ func jsonTester(errPrefix, badJSONErr string, in any, decoded json.Unmarshaler, 
 	baddie = jsonTesterBaddie{
 		key:           "\"group\"",
 		value:         "\"group\":-1, \"oldGroup\"",
-		expectedError: badJSONErr,
+		expectedError: errPrefix,
 	}
 
 	if err := testJSONBaddie(in, decoded, baddie); err != nil {
@@ -395,7 +531,7 @@ func jsonTester(errPrefix, badJSONErr string, in any, decoded json.Unmarshaler, 
 	baddie = jsonTesterBaddie{
 		key:           "\"group\"",
 		value:         "\"group\":" + overflow + ", \"oldGroup\"",
-		expectedError: errPrefix + ": failed to read Group: strconv.Atoi: parsing \"9223372036854775808\": value out of range",
+		expectedError: errPrefix,
 	}
 
 	if err := testJSONBaddie(in, decoded, baddie); err != nil {

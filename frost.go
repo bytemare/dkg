@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Copyright (C) 2024 Daniel Bourdrez. All Rights Reserved.
+// Copyright (C) 2026 Daniel Bourdrez. All Rights Reserved.
 //
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree or at
@@ -29,8 +29,16 @@ type Signature struct {
 	Group ecc.Group    `json:"group"`
 }
 
-// Encode serializes the signature into a byte string.
+// Encode serializes the signature into a byte string. It returns nil for nil or malformed values.
 func (s *Signature) Encode() []byte {
+	if s == nil || !s.Group.Available() || s.R == nil || s.Z == nil {
+		return nil
+	}
+
+	if !elementInGroup(s.R, s.Group) || !scalarInGroup(s.Z, s.Group) {
+		return nil
+	}
+
 	out := make([]byte, 1, 1+s.Group.ElementLength()+s.Group.ScalarLength())
 	out[0] = byte(s.Group)
 	out = append(out, s.R.Encode()...)
@@ -73,7 +81,8 @@ func (s *Signature) Decode(data []byte) error {
 	return nil
 }
 
-// Hex returns the hexadecimal representation of the byte encoding returned by Encode().
+// Hex returns the hexadecimal representation of the byte encoding returned by Encode(). It returns an empty string when
+// Encode returns nil.
 func (s *Signature) Hex() string {
 	return hex.EncodeToString(s.Encode())
 }
@@ -100,8 +109,16 @@ func (s *Signature) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Clear overwrites the original values with default ones.
+// Clear overwrites the original values with default ones. It is a no-op for nil or malformed signatures.
 func (s *Signature) Clear() {
+	if s == nil || !s.Group.Available() || s.R == nil || s.Z == nil {
+		return
+	}
+
+	if !elementInGroup(s.R, s.Group) || !scalarInGroup(s.Z, s.Group) {
+		return
+	}
+
 	s.R.Identity()
 	s.Z.Zero()
 }
@@ -120,51 +137,142 @@ func challenge(g ecc.Group, id uint16, pubkey, r *ecc.Element) *ecc.Scalar {
 		eLen, r.Encode(),
 	)
 
-	var sc *ecc.Scalar
+	var dstPrefix []byte
 
 	switch g {
 	case ecc.Ristretto255Sha512:
-		sc = h2ristretto255(slices.Concat[[]byte]([]byte("FROST-RISTRETTO255-SHA512-v1"), dst, input))
+		dstPrefix = []byte("FROST-RISTRETTO255-SHA512-v1")
 	case ecc.P256Sha256:
-		sc = g.HashToScalar(input, slices.Concat[[]byte]([]byte("FROST-P256-SHA256-v1"), dst))
+		dstPrefix = []byte("FROST-P256-SHA256-v1")
 	case ecc.P384Sha384:
-		sc = g.HashToScalar(input, slices.Concat[[]byte]([]byte("FROST-P384-SHA384-v1"), dst))
+		dstPrefix = []byte("FROST-P384-SHA384-v1")
 	case ecc.P521Sha512:
-		sc = g.HashToScalar(input, slices.Concat[[]byte]([]byte("FROST-P521-SHA512-v1"), dst))
+		dstPrefix = []byte("FROST-P521-SHA512-v1")
 	case ecc.Edwards25519Sha512:
-		sc = h2ed25519(slices.Concat[[]byte]([]byte("FROST-ED25519-SHA512-v1"), dst, input))
+		dstPrefix = []byte("FROST-ED25519-SHA512-v1")
 	case ecc.Secp256k1Sha256:
-		sc = g.HashToScalar(input, slices.Concat[[]byte]([]byte("FROST-secp256k1-SHA256-v1"), dst))
+		dstPrefix = []byte("FROST-secp256k1-SHA256-v1")
+	}
+
+	var (
+		sc  *ecc.Scalar
+		err error
+	)
+
+	switch g {
+	case ecc.Ristretto255Sha512:
+		sc = h2ristretto255(slices.Concat[[]byte](dstPrefix, dst, input))
+	case ecc.Edwards25519Sha512:
+		sc = h2ed25519(slices.Concat[[]byte](dstPrefix, dst, input))
+	default:
+		sc, err = g.HashToScalar(input, slices.Concat[[]byte](dstPrefix, dst))
+		if err != nil {
+			panic(
+				fmt.Errorf(
+					"unexpected error in hashing to scalar in group %d with dstPrefix %q and dst %q: %w",
+					g,
+					string(dstPrefix),
+					string(dst),
+					err,
+				),
+			)
+		}
 	}
 
 	return sc
+}
+
+func validateZKProofInputs(g ecc.Group, id uint16, secret *ecc.Scalar, pubkey *ecc.Element, rand ...*ecc.Scalar) error {
+	if err := checkParticipantID(id, 0); err != nil {
+		return err
+	}
+
+	if secret == nil {
+		return errProofSecretNil
+	}
+
+	if !scalarInGroup(secret, g) {
+		return errProofSecretWrongGroup
+	}
+
+	if secret.IsZero() {
+		return errProofSecretZero
+	}
+
+	if pubkey == nil {
+		return errNilPubKey
+	}
+
+	if !elementInGroup(pubkey, g) {
+		return errPubKeyWrongGroup
+	}
+
+	if pubkey.IsIdentity() {
+		return errProofPubKeyIdentity
+	}
+
+	expectedPubKey := g.Base().Multiply(secret.Copy())
+	if !expectedPubKey.Equal(pubkey) {
+		return errProofPubKeyMismatch
+	}
+
+	if len(rand) > 1 {
+		return errProofNonceMultiple
+	}
+
+	if len(rand) == 1 {
+		nonce := rand[0]
+		if nonce == nil {
+			return errProofNonceNil
+		}
+
+		if !scalarInGroup(nonce, g) {
+			return errProofNonceWrongGroup
+		}
+
+		if nonce.IsZero() {
+			return errProofNonceZero
+		}
+	}
+
+	return nil
 }
 
 func generateZKProof(g ecc.Group, id uint16,
 	secret *ecc.Scalar,
 	pubkey *ecc.Element,
 	rand ...*ecc.Scalar,
-) *Signature {
+) (*Signature, error) {
+	if err := validateZKProofInputs(g, id, secret, pubkey, rand...); err != nil {
+		return nil, err
+	}
+
 	var k *ecc.Scalar
-	if len(rand) != 0 && rand[0] != nil {
+	if len(rand) == 1 {
 		k = rand[0]
 	} else {
-		k = g.NewScalar().Random()
+		for {
+			k = g.NewScalar().Random()
+			if !k.IsZero() {
+				break
+			}
+		}
 	}
 
 	r := g.Base().Multiply(k)
 	ch := challenge(g, id, pubkey, r)
-	mu := k.Add(secret.Copy().Multiply(ch))
+	mu := k.Copy().Add(secret.Copy().Multiply(ch))
 
 	return &Signature{
 		Group: g,
 		R:     r,
 		Z:     mu,
-	}
+	}, nil
 }
 
 // FrostGenerateZeroKnowledgeProof generates a zero-knowledge proof of secret, as defined by the FROST protocol.
-// You most probably don't want to set r, which is a random component necessary for the proof, and can safely ignore it.
+// Omit rand in normal use. If provided, exactly one rand value is accepted; it is the Schnorr proof nonce and must stay
+// secret and be unique for a given secret across distinct challenges, because reuse or disclosure can leak the secret.
 func FrostGenerateZeroKnowledgeProof(
 	c Ciphersuite,
 	id uint16,
@@ -176,10 +284,26 @@ func FrostGenerateZeroKnowledgeProof(
 		return nil, errInvalidCiphersuite
 	}
 
-	return generateZKProof(ecc.Group(c), id, secret, pubkey, rand...), nil
+	return generateZKProof(ecc.Group(c), id, secret, pubkey, rand...)
 }
 
 func verifyZKProof(g ecc.Group, id uint16, pubkey *ecc.Element, proof *Signature) bool {
+	if err := checkParticipantID(id, 0); err != nil {
+		return false
+	}
+
+	if pubkey == nil || proof == nil || proof.R == nil || proof.Z == nil {
+		return false
+	}
+
+	if !elementInGroup(pubkey, g) || !elementInGroup(proof.R, g) || !scalarInGroup(proof.Z, g) {
+		return false
+	}
+
+	if pubkey.IsIdentity() || proof.R.IsIdentity() {
+		return false
+	}
+
 	ch := challenge(g, id, pubkey, proof.R)
 	rc := g.Base().
 		Multiply(proof.Z).
@@ -194,6 +318,10 @@ func FrostVerifyZeroKnowledgeProof(c Ciphersuite, id uint16, pubkey *ecc.Element
 		return false, errInvalidCiphersuite
 	}
 
+	if err := checkParticipantID(id, 0); err != nil {
+		return false, err
+	}
+
 	return verifyZKProof(ecc.Group(c), id, pubkey, proof), nil
 }
 
@@ -206,9 +334,9 @@ func decodeScalar(g ecc.Group, b []byte) *ecc.Scalar {
 
 func h2ristretto255(input []byte) *ecc.Scalar {
 	h := hash.FromCrypto(ecc.Ristretto255Sha512.HashFunc()).Hash(input)
-	s := ristretto255.NewScalar().FromUniformBytes(h)
+	s, _ := ristretto255.NewScalar().SetUniformBytes(h) //nolint:errcheck // Unreachable error: HashFunc will always be of the right length.
 
-	return decodeScalar(ecc.Ristretto255Sha512, s.Encode(nil))
+	return decodeScalar(ecc.Ristretto255Sha512, s.Bytes())
 }
 
 func h2ed25519(input []byte) *ecc.Scalar {

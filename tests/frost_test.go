@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Copyright (C) 2024 Daniel Bourdrez. All Rights Reserved.
+// Copyright (C) 2026 Daniel Bourdrez. All Rights Reserved.
 //
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree or at
@@ -64,6 +64,99 @@ func TestFrostGenerateZeroKnowledgeProof(t *testing.T) {
 	})
 }
 
+func TestFrostGenerateZeroKnowledgeProof_BadInputs(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		id := c.zk.id
+		sk := readHexScalar(t, c.group, c.zk.sk)
+		pk := readHexElement(t, c.group, c.zk.pk)
+		nonce := readHexScalar(t, c.group, c.zk.k)
+
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, 0, sk, pk, nonce); err == nil ||
+			err.Error() != errors.New("identifier is 0").Error() {
+			t.Fatalf("expected participant id error, got %q", err)
+		}
+
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, nil, pk, nonce); err == nil ||
+			err.Error() != errors.New("the provided secret is nil").Error() {
+			t.Fatalf("expected nil secret error, got %q", err)
+		}
+
+		badSecretGroup := testOtherGroup(c.group).NewScalar().Random()
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, badSecretGroup, pk, nonce); err == nil ||
+			err.Error() != errors.New("the provided secret has incompatible EC group").Error() {
+			t.Fatalf("expected secret group error, got %q", err)
+		}
+
+		zeroSecret := c.group.NewScalar()
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, zeroSecret, pk, nonce); err == nil ||
+			err.Error() != errors.New("the provided secret is zero").Error() {
+			t.Fatalf("expected zero secret error, got %q", err)
+		}
+
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, nil, nonce); err == nil ||
+			err.Error() != errors.New("the provided public key is nil").Error() {
+			t.Fatalf("expected nil public key error, got %q", err)
+		}
+
+		badPubKeyGroup := testOtherGroup(c.group).Base()
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, badPubKeyGroup, nonce); err == nil ||
+			err.Error() != errors.New("the provided public key has incompatible EC group").Error() {
+			t.Fatalf("expected public key group error, got %q", err)
+		}
+
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, c.group.NewElement(), nonce); err == nil ||
+			err.Error() != errors.New("the provided public key is identity").Error() {
+			t.Fatalf("expected identity public key error, got %q", err)
+		}
+
+		mismatchedPK := c.group.Base().Multiply(c.group.NewScalar().Random())
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, mismatchedPK, nonce); err == nil ||
+			err.Error() != errors.New("the provided public key does not match the secret").Error() {
+			t.Fatalf("expected mismatch error, got %q", err)
+		}
+
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, nil, nonce); err == nil ||
+			err.Error() != errors.New("only one deterministic nonce is supported").Error() {
+			t.Fatalf("expected multiple nonce error, got %q", err)
+		}
+
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, nil); err == nil ||
+			err.Error() != errors.New("the provided nonce is nil").Error() {
+			t.Fatalf("expected nil nonce error, got %q", err)
+		}
+
+		otherNonce := testOtherGroup(c.group).NewScalar().Random()
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, otherNonce); err == nil ||
+			err.Error() != errors.New("the provided nonce has incompatible EC group").Error() {
+			t.Fatalf("expected nonce group error, got %q", err)
+		}
+
+		zeroNonce := c.group.NewScalar()
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, zeroNonce); err == nil ||
+			err.Error() != errors.New("the provided nonce is zero").Error() {
+			t.Fatalf("expected zero nonce error, got %q", err)
+		}
+	})
+}
+
+func TestFrostGenerateZeroKnowledgeProof_DeterministicNonceNotMutated(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		id := c.zk.id
+		nonce := readHexScalar(t, c.group, c.zk.k)
+		nonceBefore := nonce.Copy()
+		sk := readHexScalar(t, c.group, c.zk.sk)
+		pk := readHexElement(t, c.group, c.zk.pk)
+
+		if _, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, nonce); err != nil {
+			t.Fatal(err)
+		}
+
+		if !nonce.Equal(nonceBefore) {
+			t.Fatal("expected caller nonce to remain unchanged")
+		}
+	})
+}
+
 func TestFrostVerifyZeroKnowledgeProof(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
 		id := c.zk.id
@@ -80,13 +173,67 @@ func TestFrostVerifyZeroKnowledgeProof(t *testing.T) {
 	})
 }
 
+func TestFrostVerifyZeroKnowledgeProof_RejectsIdentityInputs(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		id := c.zk.id
+		pk := readHexElement(t, c.group, c.zk.pk)
+		proof := &dkg.Signature{
+			Group: c.group,
+			R:     readHexElement(t, c.group, c.zk.r),
+			Z:     readHexScalar(t, c.group, c.zk.z),
+		}
+
+		if ok, err := dkg.FrostVerifyZeroKnowledgeProof(c.ciphersuite, 0, pk, proof); err == nil || ok {
+			t.Fatal("expected zero participant id to be rejected")
+		}
+
+		proof.R = c.group.NewElement()
+		if ok, err := dkg.FrostVerifyZeroKnowledgeProof(c.ciphersuite, id, pk, proof); err != nil || ok {
+			t.Fatal("expected identity R to be rejected")
+		}
+
+		proof.R = readHexElement(t, c.group, c.zk.r)
+		if ok, err := dkg.FrostVerifyZeroKnowledgeProof(c.ciphersuite, id, c.group.NewElement(), proof); err != nil ||
+			ok {
+			t.Fatal("expected identity pubkey to be rejected")
+		}
+	})
+}
+
+func TestFrostVerifyZeroKnowledgeProof_MalformedInputs(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		id := c.zk.id
+		pk := readHexElement(t, c.group, c.zk.pk)
+		proof := &dkg.Signature{
+			Group: c.group,
+			R:     new(ecc.Element),
+			Z:     new(ecc.Scalar),
+		}
+
+		if has, err := hasPanic(func() {
+			ok, err := dkg.FrostVerifyZeroKnowledgeProof(c.ciphersuite, id, pk, proof)
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if ok {
+				t.Fatal("expected malformed proof to be rejected")
+			}
+		}); has {
+			t.Fatalf("unexpected panic: %v", err)
+		}
+	})
+}
+
 func TestSignature_Clear(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
 		k := c.group.NewScalar().Random()
 		sk := c.group.NewScalar().Random()
 		pk := c.group.Base().Multiply(sk)
 		id := uint16(1)
-		s, _ := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, k)
+		s, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, id, sk, pk, k)
+		if err != nil {
+			t.Fatal(err)
+		}
 		s.Clear()
 
 		if !s.R.IsIdentity() {
@@ -96,6 +243,33 @@ func TestSignature_Clear(t *testing.T) {
 		if !s.Z.IsZero() {
 			t.Fatal()
 		}
+	})
+}
+
+func TestSignature_Clear_Hardening(t *testing.T) {
+	testAllCases(t, func(c *testCase) {
+		t.Run("nil receiver", func(t *testing.T) {
+			var s *dkg.Signature
+			if has, err := hasPanic(func() { s.Clear() }); has {
+				t.Fatalf("unexpected panic: %v", err)
+			}
+		})
+
+		t.Run("malformed wrapper", func(t *testing.T) {
+			s := &dkg.Signature{
+				Group: c.group,
+				R:     new(ecc.Element),
+				Z:     new(ecc.Scalar),
+			}
+			r := s.R
+			z := s.Z
+			if has, err := hasPanic(func() { s.Clear() }); has {
+				t.Fatalf("unexpected panic: %v", err)
+			}
+			if s.R != r || s.Z != z {
+				t.Fatal("expected malformed signature clear to be a no-op")
+			}
+		})
 	})
 }
 
@@ -113,7 +287,10 @@ func TestFrostWrongGroup(t *testing.T) {
 		}
 
 		// FrostVerifyZeroKnowledgeProof
-		p, _ := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, 1, sk, pk)
+		p, err := dkg.FrostGenerateZeroKnowledgeProof(c.ciphersuite, 1, sk, pk)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if _, err := dkg.FrostVerifyZeroKnowledgeProof(badGroup, 1, pk, p); err == nil ||
 			err.Error() != errInvalidCiphersuite.Error() {
 			t.Fatalf("expected %q, got %q", errInvalidCiphersuite, err)

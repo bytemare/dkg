@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Copyright (C) 2024 Daniel Bourdrez. All Rights Reserved.
+// Copyright (C) 2026 Daniel Bourdrez. All Rights Reserved.
 //
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree or at
@@ -13,8 +13,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"regexp"
-	"strconv"
 
 	"github.com/bytemare/ecc"
 )
@@ -24,7 +22,8 @@ var (
 	errRound2DecodePrefix = errors.New("failed to decode Round 2 data")
 )
 
-// Round1Data is the output data of the Start() function, to be broadcast to all participants.
+// Round1Data is the output data of the Start() function, to be broadcast to all participants. Keep ProofOfKnowledge
+// intact until all participants have called Continue and until VerificationKeyFromRound1 has been called, if used.
 type Round1Data struct {
 	ProofOfKnowledge *Signature     `json:"proof"`
 	Commitment       []*ecc.Element `json:"commitment"`
@@ -32,8 +31,22 @@ type Round1Data struct {
 	Group            ecc.Group      `json:"group"`
 }
 
-// Encode returns a compact byte serialization of Round1Data.
+// Encode returns a compact byte serialization of Round1Data. It returns nil for nil or malformed values.
 func (d *Round1Data) Encode() []byte {
+	if d == nil || !d.Group.Available() || d.ProofOfKnowledge == nil || len(d.Commitment) == 0 {
+		return nil
+	}
+
+	if !elementInGroup(d.ProofOfKnowledge.R, d.Group) || !scalarInGroup(d.ProofOfKnowledge.Z, d.Group) {
+		return nil
+	}
+
+	for _, c := range d.Commitment {
+		if !elementInGroup(c, d.Group) {
+			return nil
+		}
+	}
+
 	size := 1 + 2 + 2 + d.Group.ElementLength() + d.Group.ScalarLength() + len(d.Commitment)*d.Group.ElementLength()
 	out := make([]byte, 5, size)
 	out[0] = byte(d.Group)
@@ -49,7 +62,8 @@ func (d *Round1Data) Encode() []byte {
 	return out
 }
 
-// Hex returns the hexadecimal representation of the byte encoding returned by Encode().
+// Hex returns the hexadecimal representation of the byte encoding returned by Encode(). It returns an empty string when
+// Encode returns nil.
 func (d *Round1Data) Hex() string {
 	return hex.EncodeToString(d.Encode())
 }
@@ -157,7 +171,8 @@ func (d *Round1Data) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Round2Data is an output of the Continue() function, to be sent to the Receiver.
+// Round2Data is an output of the Continue() function, to be sent only to RecipientIdentifier. It contains secret share
+// material and must be sent over authenticated confidential transport; never broadcast or log it.
 type Round2Data struct {
 	SecretShare         *ecc.Scalar `json:"secretShare"`
 	SenderIdentifier    uint16      `json:"senderId"`
@@ -165,19 +180,33 @@ type Round2Data struct {
 	Group               ecc.Group   `json:"group"`
 }
 
-// Encode returns a compact byte serialization of Round2Data.
+// Encode returns a compact byte serialization of Round2Data. It returns nil for nil or malformed values.
 func (d *Round2Data) Encode() []byte {
+	if d == nil || !d.Group.Available() || d.SecretShare == nil {
+		return nil
+	}
+
+	if !scalarInGroup(d.SecretShare, d.Group) {
+		return nil
+	}
+
+	share := d.SecretShare.Encode()
+	if len(share) == 0 {
+		return nil
+	}
+
 	size := 1 + 4 + d.Group.ScalarLength()
 	out := make([]byte, 5, size)
 	out[0] = byte(d.Group)
 	binary.LittleEndian.PutUint16(out[1:3], d.SenderIdentifier)
 	binary.LittleEndian.PutUint16(out[3:5], d.RecipientIdentifier)
-	out = append(out, d.SecretShare.Encode()...)
+	out = append(out, share...)
 
 	return out
 }
 
-// Hex returns the hexadecimal representation of the byte encoding returned by Encode().
+// Hex returns the hexadecimal representation of the byte encoding returned by Encode(). It returns an empty string when
+// Encode returns nil.
 func (d *Round2Data) Hex() string {
 	return hex.EncodeToString(d.Encode())
 }
@@ -243,40 +272,4 @@ func (d *Round2Data) UnmarshalJSON(data []byte) error {
 	*d = Round2Data(*r)
 
 	return nil
-}
-
-func jsonReGetField(key, s, catch string) (string, error) {
-	r := fmt.Sprintf(`%q:%s`, key, catch)
-	re := regexp.MustCompile(r)
-	matches := re.FindStringSubmatch(s)
-
-	if len(matches) != 2 {
-		return "", errEncodingInvalidJSONEncoding
-	}
-
-	return matches[1], nil
-}
-
-// jsonReGetGroup attempts to find the Ciphersuite JSON encoding in s.
-func jsonReGetGroup(s string) (Ciphersuite, error) {
-	f, err := jsonReGetField("group", s, `(\w+)`)
-	if err != nil {
-		return 0, err
-	}
-
-	i, err := strconv.Atoi(f)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read Group: %w", err)
-	}
-
-	if i < 0 || i > 63 {
-		return 0, errInvalidCiphersuite
-	}
-
-	c := Ciphersuite(i)
-	if !c.Available() {
-		return 0, errInvalidCiphersuite
-	}
-
-	return c, nil
 }

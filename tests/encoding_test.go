@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Copyright (C) 2024 Daniel Bourdrez. All Rights Reserved.
+// Copyright (C) 2026 Daniel Bourdrez. All Rights Reserved.
 //
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree or at
@@ -188,9 +188,9 @@ func Test_Encoding_R1R2(t *testing.T) {
 	p2, _ := c.NewParticipant(2, threshold, maxSigners)
 	p3, _ := c.NewParticipant(3, threshold, maxSigners)
 
-	r1P1 := p1.Start()
-	r1P2 := p2.Start()
-	r1P3 := p3.Start()
+	r1P1 := mustStart(t, p1)
+	r1P2 := mustStart(t, p2)
+	r1P3 := mustStart(t, p3)
 
 	testR1Encoding(t, r1P1)
 	testR1Encoding(t, r1P2)
@@ -248,7 +248,7 @@ func TestSignature_Encoding(t *testing.T) {
 	testAllCases(t, func(c *testCase) {
 		p := c.makeParticipants(t)
 
-		signature := p[0].Start().ProofOfKnowledge
+		signature := mustStart(t, p[0]).ProofOfKnowledge
 
 		if err := testAndCompareSerde(signature, func() serde {
 			return new(dkg.Signature)
