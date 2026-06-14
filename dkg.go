@@ -116,10 +116,6 @@ func checkCommitment(g ecc.Group, threshold uint16, commitment []*ecc.Element) e
 }
 
 func elementInGroup(element *ecc.Element, group ecc.Group) bool {
-	defer func() {
-		_ = recover()
-	}()
-
 	if element == nil || !group.Available() {
 		return false
 	}
@@ -143,10 +139,6 @@ func elementGroup(element *ecc.Element) (group ecc.Group, ok bool) {
 }
 
 func scalarInGroup(scalar *ecc.Scalar, group ecc.Group) bool {
-	defer func() {
-		_ = recover()
-	}()
-
 	if scalar == nil || !group.Available() {
 		return false
 	}
