@@ -15,7 +15,7 @@ This is secure for any _t among n_ participants in a (t,n)-threshold scheme.
 This effectively generates keys among participants without the need of a trusted dealer or third-party. These keys are
 generally valid keys, and can be used in [FROST](https://github.com/bytemare/frost) and [OPRFs](https://github.com/bytemare/oprf).
 
-#### References
+References:
 
 - Pedersen introduced the [first DKG protocol](https://link.springer.com/chapter/10.1007/3-540-46416-6_47), based on Feldman's Verifiable Secret Sharing.
 - Komlo & Goldberg [add zero-knowledge proofs](https://eprint.iacr.org/2020/852.pdf) to the Ped-DKG.
