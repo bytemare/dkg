@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 //
-// Copyright (C) 2024 Daniel Bourdrez. All Rights Reserved.
+// Copyright (C) 2026 Daniel Bourdrez. All Rights Reserved.
 //
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the root directory of this source tree or at
@@ -15,8 +15,9 @@ import (
 	"fmt"
 
 	"github.com/bytemare/ecc"
-	secretsharing "github.com/bytemare/secret-sharing"
 	"github.com/bytemare/secret-sharing/keys"
+
+	secretsharing "github.com/bytemare/secret-sharing"
 )
 
 // A Ciphersuite defines the elliptic curve group to use.
@@ -73,16 +74,169 @@ func checkPolynomial(threshold uint16, p secretsharing.Polynomial) error {
 		return fmt.Errorf("invalid polynomial: %w", err)
 	}
 
+	if p[0].IsZero() {
+		return errInvalidPolynomialSecretZero
+	}
+
+	if threshold > 1 && p[threshold-1].IsZero() {
+		return errInvalidPolynomialHighestDegreeZero
+	}
+
 	return nil
+}
+
+func checkCommitment(g ecc.Group, threshold uint16, commitment []*ecc.Element) error {
+	if len(commitment) == 0 {
+		return errCommitmentEmpty
+	}
+
+	if len(commitment) != int(threshold) {
+		return errPolynomialLength
+	}
+
+	for _, coefficient := range commitment {
+		if coefficient == nil {
+			return errCommitmentNilElement
+		}
+
+		if !elementInGroup(coefficient, g) {
+			return errCommitmentWrongGroup
+		}
+	}
+
+	if commitment[0].IsIdentity() {
+		return errCommitmentIdentityElement
+	}
+
+	if threshold > 1 && commitment[threshold-1].IsIdentity() {
+		return errCommitmentIdentityElement
+	}
+
+	return nil
+}
+
+func elementInGroup(element *ecc.Element, group ecc.Group) bool {
+	defer func() {
+		_ = recover() //nolint:errcheck // No need to retrieve the error.
+	}()
+
+	if element == nil || !group.Available() {
+		return false
+	}
+
+	return element.Group() == group
+}
+
+func elementGroup(element *ecc.Element) (group ecc.Group, ok bool) {
+	defer func() {
+		if recover() != nil {
+			group = 0
+			ok = false
+		}
+	}()
+
+	if element == nil {
+		return 0, false
+	}
+
+	return element.Group(), true
+}
+
+func scalarInGroup(scalar *ecc.Scalar, group ecc.Group) bool {
+	defer func() {
+		_ = recover() //nolint:errcheck // No need to retrieve the error.
+	}()
+
+	if scalar == nil || !group.Available() {
+		return false
+	}
+
+	return scalar.Group() == group
+}
+
+func checkSecretShare(g ecc.Group, share *ecc.Scalar) error {
+	if share == nil {
+		return errSecretShareNil
+	}
+
+	if !scalarInGroup(share, g) {
+		return errSecretShareWrongGroup
+	}
+
+	return nil
+}
+
+func checkCommitmentSet(g ecc.Group, commitments [][]*ecc.Element) error {
+	if len(commitments) == 0 {
+		return errMissingCommitment
+	}
+
+	if len(commitments[0]) == 0 {
+		return errMissingCommitment
+	}
+
+	threshold := uint16(len(commitments[0]))
+	if int(threshold) != len(commitments[0]) {
+		return errPolynomialLength
+	}
+
+	for _, commitment := range commitments {
+		if len(commitment) == 0 {
+			return errMissingCommitment
+		}
+
+		if err := checkCommitment(g, threshold, commitment); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func checkAggregateCommitment(threshold uint16, commitment []*ecc.Element) error {
+	if threshold > 1 && commitment[threshold-1].IsIdentity() {
+		return errAggregateCommitmentHighestDegree
+	}
+
+	return nil
+}
+
+func randomPolynomialCoefficient(g ecc.Group, index, threshold uint16) *ecc.Scalar {
+	for {
+		coefficient := g.NewScalar().Random()
+		if index != 0 && index != threshold-1 {
+			return coefficient
+		}
+
+		if !coefficient.IsZero() {
+			return coefficient
+		}
+	}
 }
 
 var errIDOutOfRange = errors.New("identifier is above authorized range")
 
-// NewParticipant instantiates a new participant with identifier id. The identifier must be different from zero and
-// unique among the set of participants. The same participant instance must be used throughout the protocol execution,
-// to ensure the correct internal intermediary values are used. Optionally, the participant's secret polynomial can be
-// provided to set its secret and commitment (also enabling re-instantiating the same participant if the same polynomial
-// is used).
+func checkParticipantID(id, maxSigners uint16) error {
+	if id == 0 {
+		return errParticipantIDZero
+	}
+
+	if maxSigners != 0 && id > maxSigners {
+		return fmt.Errorf("%w [1:%d]: %d", errIDOutOfRange, maxSigners, id)
+	}
+
+	return nil
+}
+
+// NewParticipant instantiates a new participant with identifier id. The identifier must be non-zero and unique among
+// the set of participants. maxSigners and threshold must be non-zero, and threshold must be at most maxSigners.
+//
+// The same Participant instance must be used throughout the protocol execution, because it stores the validated
+// intermediary values between Start, Continue, and Finalize. Optionally, the participant's secret polynomial can be
+// provided to set its secret and commitment, which enables re-instantiating the same participant if the same polynomial
+// is used. A provided polynomial must have exactly threshold coefficients, valid same-group scalar coefficients, a
+// non-zero secret coefficient, and a non-zero highest-degree coefficient. Interior zero coefficients and repeated
+// coefficient values are valid.
 func (c Ciphersuite) NewParticipant(
 	id uint16,
 	threshold, maxSigners uint16,
@@ -92,12 +246,20 @@ func (c Ciphersuite) NewParticipant(
 		return nil, errInvalidCiphersuite
 	}
 
-	if id == 0 {
-		return nil, errParticipantIDZero
+	if maxSigners == 0 {
+		return nil, errMaxSignersZero
 	}
 
-	if id > maxSigners {
-		return nil, fmt.Errorf("%w [1:%d]: %d", errIDOutOfRange, maxSigners, id)
+	if threshold == 0 {
+		return nil, errThresholdZero
+	}
+
+	if threshold > maxSigners {
+		return nil, errThresholdAboveMaxSigners
+	}
+
+	if err := checkParticipantID(id, maxSigners); err != nil {
+		return nil, err
 	}
 
 	p := &Participant{
@@ -111,254 +273,107 @@ func (c Ciphersuite) NewParticipant(
 			secretShare: nil,
 			polynomial:  nil,
 		},
-		commitment: nil,
+		commitment:          nil,
+		verifiedCommitments: nil,
+		state:               participantStateInitialized,
 	}
 
 	if err := p.initPoly(polynomial...); err != nil {
 		return nil, err
 	}
 
-	p.commitment = secretsharing.Commit(p.group, p.polynomial)
+	commitment, err := secretsharing.Commit(p.group, p.polynomial)
+	if err != nil {
+		return nil, fmt.Errorf("failed to commit participant polynomial: %w", err)
+	}
+
+	p.commitment = commitment
 
 	return p, nil
 }
 
-// Participant represent a party in the Distributed Key Generation. Once the DKG completed, all values must be erased.
-type Participant struct {
-	*secrets
-	*config
-	commitment []*ecc.Element
-	Identifier uint16
-}
-
-type config struct {
-	maxSigners uint16
-	threshold  uint16
-	group      ecc.Group
-}
-
-type secrets struct {
-	secretShare *ecc.Scalar
-	polynomial  secretsharing.Polynomial
-}
-
-func (p *Participant) resetPolynomial() {
-	for _, s := range p.polynomial {
-		s.Zero()
-	}
-}
-
-func (p *Participant) initPoly(polynomial ...*ecc.Scalar) error {
-	p.polynomial = secretsharing.NewPolynomial(p.threshold)
-
-	if len(polynomial) != 0 {
-		if err := checkPolynomial(p.threshold, polynomial); err != nil {
-			return err
-		}
-
-		for i, poly := range polynomial {
-			p.polynomial[i] = poly.Copy()
-		}
-	} else {
-		for i := range p.threshold {
-			p.polynomial[i] = p.group.NewScalar().Random()
-		}
-	}
-
-	p.secretShare = p.polynomial.Evaluate(p.group.NewScalar().SetUInt64(uint64(p.Identifier)))
-
-	return nil
-}
-
-// Start returns a participant's output for the first round.
-func (p *Participant) Start() *Round1Data {
-	return p.StartWithRandom(nil)
-}
-
-// StartWithRandom returns a participant's output for the first round and allows setting the random input for the NIZK
-// proof.
-func (p *Participant) StartWithRandom(random *ecc.Scalar) *Round1Data {
-	package1 := &Round1Data{
-		Group:            p.group,
-		SenderIdentifier: p.Identifier,
-		Commitment:       p.commitment,
-		ProofOfKnowledge: generateZKProof(p.group, p.Identifier, p.polynomial[0], p.commitment[0], random),
-	}
-
-	return package1
-}
-
-// Continue ingests the broadcast data from other peers and returns a map of dedicated Round2Data structures
-// for each peer.
-func (p *Participant) Continue(r1DataSet []*Round1Data) (map[uint16]*Round2Data, error) {
-	// We accept the case where the input does not contain the package from the participant.
-	if len(r1DataSet) != int(p.maxSigners) && len(r1DataSet) != int(p.maxSigners-1) {
+func commitmentsFromRound1DataSet(g ecc.Group, r1DataSet []*Round1Data) ([][]*ecc.Element, error) {
+	if len(r1DataSet) == 0 {
 		return nil, errRound1DataElements
 	}
 
-	r2data := make(map[uint16]*Round2Data, p.maxSigners-1)
+	seen := make(map[uint16]struct{}, len(r1DataSet))
+	commitments := make([][]*ecc.Element, 0, len(r1DataSet))
 
 	for _, data := range r1DataSet {
-		if data == nil || data.SenderIdentifier == p.Identifier {
-			continue
+		if data == nil {
+			return nil, errRound1NilPackage
 		}
 
-		if len(data.Commitment) == 0 || data.Commitment[0] == nil {
-			return nil, errCommitmentNilElement
-		}
-
-		peer := data.SenderIdentifier
-
-		// round1, step 5
-		if !verifyZKProof(p.group, peer, data.Commitment[0], data.ProofOfKnowledge) {
-			return nil, fmt.Errorf(
-				"%w: participant %v",
-				errAbortInvalidSignature,
-				peer,
-			)
-		}
-
-		// round 2, step 1
-		peerS := p.group.NewScalar().SetUInt64(uint64(peer))
-		r2data[peer] = &Round2Data{
-			Group:               p.group,
-			SenderIdentifier:    p.Identifier,
-			RecipientIdentifier: peer,
-			SecretShare:         p.polynomial.Evaluate(peerS),
-		}
-	}
-
-	p.resetPolynomial()
-
-	return r2data, nil
-}
-
-func getCommitment(r1DataSet []*Round1Data, id uint16) ([]*ecc.Element, error) {
-	for _, r1d := range r1DataSet {
-		if r1d.SenderIdentifier == id {
-			if len(r1d.Commitment) == 0 {
-				return nil, fmt.Errorf(errWrapperWithID, errCommitmentEmpty, id)
-			}
-
-			return r1d.Commitment, nil
-		}
-	}
-
-	return nil, fmt.Errorf(errWrapperWithID, errCommitmentNotFound, id)
-}
-
-func (p *Participant) checkRound2DataHeader(d *Round2Data) error {
-	if d.RecipientIdentifier == d.SenderIdentifier {
-		return errRound2FaultyPackage
-	}
-
-	if d.SenderIdentifier == p.Identifier {
-		return errRound2OwnPackage
-	}
-
-	if d.RecipientIdentifier != p.Identifier {
-		return errRound2InvalidReceiver
-	}
-
-	return nil
-}
-
-func (p *Participant) verifyRound2Data(r1 []*Round1Data, r2 *Round2Data) (*ecc.Element, error) {
-	if err := p.checkRound2DataHeader(r2); err != nil {
-		return nil, err
-	}
-
-	// Find the commitment from that participant.
-	com, err := getCommitment(r1, r2.SenderIdentifier)
-	if err != nil {
-		return nil, err
-	}
-
-	// Verify the secret share is valid with regard to the commitment.
-	err = p.verifyCommitmentPublicKey(r2.SenderIdentifier, r2.SecretShare, com)
-	if err != nil {
-		return nil, err
-	}
-
-	return com[0], nil
-}
-
-// Finalize ingests the broadcast data from round 1 and the round 2 data destined for the participant,
-// and returns the participant's secret share and verification key, and the group's public key.
-func (p *Participant) Finalize(r1DataSet []*Round1Data, r2DataSet []*Round2Data) (*keys.KeyShare, error) {
-	if len(r1DataSet) != int(p.maxSigners) && len(r1DataSet) != int(p.maxSigners-1) {
-		return nil, errRound1DataElements
-	}
-
-	if len(r2DataSet) != int(p.maxSigners-1) {
-		return nil, errRound2DataElements
-	}
-
-	secretKey := p.group.NewScalar()
-	verificationKey := p.group.NewElement()
-
-	for _, data := range r2DataSet {
-		peerCommitment, err := p.verifyRound2Data(r1DataSet, data)
-		if err != nil {
+		id := data.SenderIdentifier
+		if err := checkParticipantID(id, 0); err != nil {
 			return nil, err
 		}
 
-		secretKey.Add(data.SecretShare)
-		verificationKey.Add(peerCommitment)
+		if _, ok := seen[id]; ok {
+			return nil, fmt.Errorf(errWrapperWithID, errRound1DuplicateSender, id)
+		}
+
+		seen[id] = struct{}{}
+
+		if len(data.Commitment) == 0 {
+			return nil, errMissingCommitment
+		}
+
+		if data.ProofOfKnowledge == nil || data.ProofOfKnowledge.R == nil || data.ProofOfKnowledge.Z == nil {
+			return nil, fmt.Errorf("%w: participant %d", errAbortInvalidSignature, id)
+		}
+
+		if !verifyZKProof(g, id, data.Commitment[0], data.ProofOfKnowledge) {
+			return nil, fmt.Errorf("%w: participant %d", errAbortInvalidSignature, id)
+		}
+
+		commitments = append(commitments, data.Commitment)
 	}
 
-	secretKey.Add(p.secretShare)
-	p.secretShare.Zero()
-
-	return &keys.KeyShare{
-		Secret:          secretKey,
-		VerificationKey: verificationKey.Add(p.commitment[0]),
-		PublicKeyShare: keys.PublicKeyShare{
-			PublicKey:     p.group.Base().Multiply(secretKey),
-			VssCommitment: p.commitment,
-			ID:            p.Identifier,
-			Group:         p.group,
-		},
-	}, nil
-}
-
-func (p *Participant) verifyCommitmentPublicKey(id uint16, share *ecc.Scalar, commitment []*ecc.Element) error {
-	pk := p.group.Base().Multiply(share)
-	if !secretsharing.Verify(p.group, p.Identifier, pk, commitment) {
-		return fmt.Errorf(
-			"%w: %d",
-			errAbortInvalidSecretShare,
-			id,
-		)
+	if err := checkCommitmentSet(g, commitments); err != nil {
+		return nil, err
 	}
 
-	return nil
+	return commitments, nil
 }
 
 // VerificationKeyFromRound1 returns the global public key, usable to verify signatures produced in a threshold scheme.
+// It validates each Round 1 commitment and proof of knowledge, so it must be called before proofs are cleared.
 func VerificationKeyFromRound1(c Ciphersuite, r1DataSet []*Round1Data) (*ecc.Element, error) {
 	if !c.Available() {
 		return nil, errInvalidCiphersuite
 	}
 
 	g := ecc.Group(c)
+
+	commitments, err := commitmentsFromRound1DataSet(g, r1DataSet)
+	if err != nil {
+		return nil, err
+	}
+
 	pubKey := g.NewElement()
 
-	for _, d := range r1DataSet {
-		pubKey.Add(d.Commitment[0])
+	for _, commitment := range commitments {
+		pubKey.Add(commitment[0])
 	}
 
 	return pubKey, nil
 }
 
-// VerificationKeyFromCommitments returns the threshold's setup group public key, given all the commitments from all the
-// participants.
+// VerificationKeyFromCommitments returns the threshold setup's group public key from participant commitments. It assumes
+// those commitments came from an already validated DKG transcript or another trusted source, because it does not verify
+// the Round 1 proofs of knowledge.
 func VerificationKeyFromCommitments(c Ciphersuite, commitments [][]*ecc.Element) (*ecc.Element, error) {
 	if !c.Available() {
 		return nil, errInvalidCiphersuite
 	}
 
 	g := ecc.Group(c)
+	if err := checkCommitmentSet(g, commitments); err != nil {
+		return nil, err
+	}
+
 	pubKey := g.NewElement()
 
 	for _, com := range commitments {
@@ -378,14 +393,18 @@ func ComputeParticipantPublicKey(c Ciphersuite, id uint16, commitments [][]*ecc.
 		return nil, errMissingCommitment
 	}
 
+	if err := checkParticipantID(id, 0); err != nil {
+		return nil, err
+	}
+
 	g := ecc.Group(c)
+	if err := checkCommitmentSet(g, commitments); err != nil {
+		return nil, err
+	}
+
 	pk := g.NewElement().Identity()
 
 	for _, commitment := range commitments {
-		if len(commitment) == 0 {
-			return nil, errMissingCommitment
-		}
-
 		prime, err := secretsharing.PubKeyForCommitment(g, id, commitment)
 		if err != nil {
 			return nil, fmt.Errorf("%w", err)
@@ -408,13 +427,18 @@ func VerifyPublicKey(c Ciphersuite, id uint16, pubKey *ecc.Element, commitments 
 		return errNilPubKey
 	}
 
+	if !elementInGroup(pubKey, ecc.Group(c)) {
+		return errPubKeyWrongGroup
+	}
+
 	yi, err := ComputeParticipantPublicKey(c, id, commitments)
 	if err != nil {
 		return err
 	}
 
 	if !pubKey.Equal(yi) {
-		return fmt.Errorf("%w: want %q got %q",
+		return fmt.Errorf(
+			"%w: want %q got %q",
 			errVerificationShareFailed,
 			yi.Hex(),
 			pubKey.Hex(),
@@ -424,13 +448,19 @@ func VerifyPublicKey(c Ciphersuite, id uint16, pubKey *ecc.Element, commitments 
 	return nil
 }
 
-// VSSCommitmentsFromRegistry returns all the commitments for the set of PublicKeyShares in the registry.
-func VSSCommitmentsFromRegistry(registry *keys.PublicKeyShareRegistry) [][]*ecc.Element {
-	c := make([][]*ecc.Element, 0, len(registry.PublicKeyShares))
+// VSSCommitmentFromRegistry returns the aggregate commitment for a complete registry.
+func VSSCommitmentFromRegistry(registry *keys.PublicKeyShareRegistry) []*ecc.Element {
+	return registry.Commitment()
+}
 
-	for _, pks := range registry.PublicKeyShares {
-		c = append(c, pks.VssCommitment)
+// VSSCommitmentsFromRegistry returns the aggregate commitment for a complete registry.
+//
+// Deprecated: use VSSCommitmentFromRegistry.
+func VSSCommitmentsFromRegistry(registry *keys.PublicKeyShareRegistry) [][]*ecc.Element {
+	commitment := VSSCommitmentFromRegistry(registry)
+	if commitment == nil {
+		return nil
 	}
 
-	return c
+	return [][]*ecc.Element{commitment}
 }

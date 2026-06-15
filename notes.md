@@ -1,4 +1,4 @@
-## Stack
+# Stack
 
 - Shamir Secret Sharing over ECDLP
 - Feldman's VSS
