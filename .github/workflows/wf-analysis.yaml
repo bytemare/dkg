@@ -126,12 +126,9 @@ jobs:
       # Gitleaks
       gitleaks: true
       # Codecov upload
-      codecov: true
-      codecov-disable-search: true
+      codecov: false
     secrets:
       # Semgrep token
       semgrep: ${{ secrets.SEMGREP_APP_TOKEN }}
       # SonarQube token
       sonarqube: ${{ secrets.SONAR_TOKEN }}
-      # Codecov token
-      codecov: ${{ secrets.CODECOV_TOKEN }}
