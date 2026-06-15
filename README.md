@@ -1,5 +1,5 @@
 # Distributed Key Generation
-[![dkg](https://github.com/bytemare/dkg/actions/workflows/wf-analysis.yml/badge.svg)](https://github.com/bytemare/dkg/actions/workflows/wf-analysis.yml)
+[![dkg](https://github.com/bytemare/dkg/actions/workflows/wf-analysis.yaml/badge.svg)](https://github.com/bytemare/dkg/actions/workflows/wf-analysis.yaml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/bytemare/dkg.svg)](https://pkg.go.dev/github.com/bytemare/dkg)
 [![codecov](https://codecov.io/gh/bytemare/dkg/branch/main/graph/badge.svg?token=5bQfB0OctA)](https://codecov.io/gh/bytemare/dkg)
 
